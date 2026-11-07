@@ -103,6 +103,21 @@ class SandboxTests(unittest.TestCase):
         )
         self.assertEqual(sorted(outputs(result)), ["outputs/bar.png", "outputs/line.png"])
 
+    def test_charts_render_chinese_without_font_setup(self):
+        result = run(
+            "import matplotlib.pyplot as plt\n"
+            "plt.plot([1, 2]); plt.title('销售趋势'); plt.xlabel('月份'); plt.show()\n"
+            "import pytesseract\n"
+            "from PIL import Image\n"
+            "print(pytesseract.image_to_string(Image.open('outputs/figure-1.png'), lang='chi_sim'))\n"
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        # A missing font logs "Glyph ... missing" per character instead.
+        self.assertNotIn("Glyph", result["stderr"])
+        self.assertIn("outputs/figure-1.png", outputs(result))
+        ocr = result["stdout"].strip().splitlines()[-1]
+        self.assertIn("销售趋势", ocr.replace(" ", ""))
+
     def test_builds_documents_with_the_bundled_libraries(self):
         result = run(
             "import docx, openpyxl, pptx, pypdf, pdfplumber, reportlab, PIL, yaml, bs4, markdown\n"
@@ -116,6 +131,38 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(result["stdout"].strip(), "['Title', 'one']")
         with zipfile.ZipFile(io.BytesIO(outputs(result)["outputs/a.docx"])) as archive:
             self.assertIn("word/document.xml", archive.namelist())
+
+    def test_chinese_documents_round_trip(self):
+        result = run(
+            "from reportlab.pdfbase import pdfmetrics\n"
+            "from reportlab.pdfbase.cidfonts import UnicodeCIDFont\n"
+            "from reportlab.platypus import SimpleDocTemplate, Paragraph\n"
+            "from reportlab.lib.styles import ParagraphStyle\n"
+            "import docx, openpyxl, pdfplumber\n"
+            "pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))\n"
+            "style = ParagraphStyle('zh', fontName='STSong-Light', fontSize=16)\n"
+            "SimpleDocTemplate('outputs/report.pdf').build([Paragraph('中文销售额报告', style)])\n"
+            "book = docx.Document(); book.add_paragraph('中文段落'); book.save('outputs/a.docx')\n"
+            "sheet = openpyxl.Workbook(); sheet.active['A1'] = '中文合计'; sheet.save('outputs/b.xlsx')\n"
+            "with pdfplumber.open('outputs/report.pdf') as pdf:\n"
+            "    print(pdf.pages[0].extract_text())\n"
+            "print(docx.Document('outputs/a.docx').paragraphs[0].text)\n"
+            "print(openpyxl.load_workbook('outputs/b.xlsx').active['A1'].value)\n"
+            "from pdf2image import convert_from_path\n"
+            "import pytesseract\n"
+            "page = convert_from_path('outputs/report.pdf', dpi=200)[0]\n"
+            "print(pytesseract.image_to_string(page, lang='chi_sim'))\n"
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        lines = [line.strip() for line in result["stdout"].splitlines() if line.strip()]
+        self.assertEqual(lines[0], "中文销售额报告")  # pdfplumber text extraction
+        self.assertEqual(lines[1], "中文段落")  # Word round-trip
+        self.assertEqual(lines[2], "中文合计")  # Excel round-trip
+        # poppler rendered the CJK font, and OCR read the page back.
+        self.assertIn("中文销售额报告", lines[-1].replace(" ", ""))
+        self.assertEqual(
+            sorted(outputs(result)), ["outputs/a.docx", "outputs/b.xlsx", "outputs/report.pdf"]
+        )
 
     @unittest.skipUnless(server.TIER == "full", "full tier only")
     def test_full_tier_converts_and_recognizes_text(self):

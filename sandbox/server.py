@@ -44,6 +44,13 @@ MAX_RUNS = int(os.environ.get("SANDBOX_MAX_RUNS", "4"))
 MEMORY_BYTES = int(os.environ.get("SANDBOX_MEMORY_MB", "4096")) * 1024 * 1024
 DEFAULT_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "60"))
 MAX_TIMEOUT = int(os.environ.get("SANDBOX_MAX_TIMEOUT_SECONDS", "300"))
+# Written to MPLCONFIGDIR/matplotlibrc before each run, which matplotlib
+# reads on import. DejaVu stays first so Latin text keeps the default look
+# while CJK glyphs fall through to the Noto CJK fonts in the image; the JP
+# face also covers Simplified and Traditional Chinese code points, and
+# family names matplotlib cannot find are skipped.
+MATPLOTLIBRC = "font.sans-serif: DejaVu Sans, Noto Sans CJK SC, Noto Sans CJK JP, sans-serif\n"
+
 MAX_PROCESSES = 64
 MAX_FILE_BYTES = 100 * 1024 * 1024
 MAX_REQUEST_BYTES = 160 * 1024 * 1024
@@ -301,6 +308,13 @@ def run(payload: dict) -> dict:
         for writable in ("outputs", "tmp", "tmp/config", "tmp/cache"):
             os.mkdir(root / writable, 0o700)
             os.chown(root / writable, uid, uid)
+        mpl_config = root / "tmp" / "matplotlib"
+        os.mkdir(mpl_config, 0o700)
+        os.chown(mpl_config, uid, uid)
+        matplotlibrc = mpl_config / "matplotlibrc"
+        matplotlibrc.write_text(MATPLOTLIBRC, encoding="utf-8")
+        os.chown(matplotlibrc, uid, uid)
+        os.chmod(matplotlibrc, 0o444)
         script = root / ".main.py"
         script.write_text(code, encoding="utf-8")
         os.chmod(script, 0o444)

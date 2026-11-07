@@ -21,13 +21,13 @@ Debian packages carry their full copyright and license texts under
 | XlsxWriter, lxml, pypdf, ReportLab, Markdown | slim, full | BSD-style |
 | pdfplumber | slim, full | MIT |
 | LibreOffice | full | MPL-2.0 |
-| Tesseract OCR and its English data | full | Apache-2.0 |
+| Tesseract OCR with its English and Simplified Chinese data | slim, full | Apache-2.0 |
 | ffmpeg (Debian build) | full | GPL-2.0-or-later |
-| Liberation, DejaVu and Noto CJK fonts | full | OFL-1.1 and permissive font licenses |
+| Liberation, DejaVu and Noto CJK fonts | slim, full | OFL-1.1 and permissive font licenses |
 | SciPy, scikit-learn, statsmodels | full | BSD-3-Clause |
 | seaborn | full | BSD-3-Clause |
 | OpenCV (opencv-python-headless) | full | Apache-2.0 (bundled components under their own licenses) |
-| pytesseract, pdf2image | full | Apache-2.0 / MIT |
+| pytesseract, pdf2image | slim, full | Apache-2.0 / MIT |
 
 Source code for the GPL and LGPL programs is available from Debian
 (`apt-get source <package>`) for the exact versions in the image, and from
