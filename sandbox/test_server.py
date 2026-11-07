@@ -105,9 +105,10 @@ class SandboxTests(unittest.TestCase):
 
     def test_charts_render_chinese_without_font_setup(self):
         result = run(
+            "import matplotlib\n"
+            "print('SANS0 ' + ','.join(matplotlib.rcParams['font.sans-serif']))\n"
             "import matplotlib.pyplot as plt\n"
-            "import matplotlib.font_manager as fm\n"
-            "print('FONTS ' + ','.join(sorted({f.name for f in fm.fontManager.ttflist if 'Droid' in f.name or 'Noto' in f.name})))\n"
+            "print('SANS1 ' + ','.join(matplotlib.rcParams['font.sans-serif']))\n"
             "plt.plot([1, 2]); plt.title('销售趋势'); plt.xlabel('月份'); plt.show()\n"
             "import pytesseract\n"
             "from PIL import Image\n"
@@ -117,8 +118,9 @@ class SandboxTests(unittest.TestCase):
         # A missing font logs "Glyph ... missing" per character instead.
         self.assertNotIn("Glyph", result["stderr"], result["stdout"])
         self.assertIn("outputs/figure-1.png", outputs(result))
-        ocr = result["stdout"].strip().splitlines()[-1]
-        self.assertIn("销售趋势", ocr.replace(" ", ""))
+        # Tesseract mixes the chart's tick labels into its output, so look
+        # for the title anywhere in what it read.
+        self.assertIn("销售趋势", result["stdout"].replace(" ", ""), result["stdout"])
 
     def test_builds_documents_with_the_bundled_libraries(self):
         result = run(

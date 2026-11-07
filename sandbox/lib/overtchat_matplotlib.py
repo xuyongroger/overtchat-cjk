@@ -18,31 +18,53 @@ from matplotlib.figure import Figure
 _savefig = Figure.savefig
 
 
+_DROID_GLOB = "/usr/share/fonts/truetype/droid/*.ttf"
+_cjk_families: list[str] = []
+
+
 def _register_cjk_fonts() -> None:
     """Add a CJK font matplotlib can actually read to the sans fallback.
 
-    The image's Noto CJK files are TTC/CFF, which matplotlib cannot load;
-    Droid Sans Fallback is a plain TrueType CJK font. Registration here is
-    independent of the injected matplotlibrc so charts keep working even if
-    that file is ever removed.
+    The image's Noto CJK files are TTC/CFF; Droid Sans Fallback is a plain
+    TrueType CJK font. Registration here is independent of the injected
+    matplotlibrc so charts keep working even if that file is ever removed.
     """
-    added = []
-    for path in sorted(glob.glob("/usr/share/fonts/truetype/*/*.ttf")):
+    for path in sorted(glob.glob(_DROID_GLOB)):
         try:
             font_manager.fontManager.addfont(path)
-            added.append(font_manager.FontProperties(fname=path).get_name())
+            name = font_manager.FontProperties(fname=path).get_name()
+            if name not in _cjk_families:
+                _cjk_families.append(name)
         except Exception:
             continue
-    if added:
+    if _cjk_families:
         sans = list(matplotlib.rcParams["font.sans-serif"])
-        sans.extend(name for name in added if name not in sans)
+        sans.extend(name for name in _cjk_families if name not in sans)
         matplotlib.rcParams["font.sans-serif"] = sans
 
 
 _register_cjk_fonts()
 
 
+def _use_cjk_fallback(fig: Figure) -> None:
+    """Append the CJK font families to every text artist before saving.
+
+    Setting rcParams proved unreliable in runs (draws kept resolving the
+    default sans list), so each figure carries the fallback explicitly.
+    """
+    from matplotlib.text import Text
+
+    if not _cjk_families:
+        return
+    for artist in fig.findobj(Text):
+        families = artist.get_fontfamily()
+        if any(name in families for name in _cjk_families):
+            continue
+        artist.set_fontfamily([*families, *_cjk_families])
+
+
 def _savefig_and_remember(self, *args, **kwargs):
+    _use_cjk_fallback(self)
     result = _savefig(self, *args, **kwargs)
     self._overtchat_saved = True
     return result
