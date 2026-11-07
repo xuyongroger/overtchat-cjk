@@ -106,6 +106,8 @@ class SandboxTests(unittest.TestCase):
     def test_charts_render_chinese_without_font_setup(self):
         result = run(
             "import matplotlib.pyplot as plt\n"
+            "import matplotlib.font_manager as fm\n"
+            "print('FONTS ' + ','.join(sorted({f.name for f in fm.fontManager.ttflist if 'Droid' in f.name or 'Noto' in f.name})))\n"
             "plt.plot([1, 2]); plt.title('销售趋势'); plt.xlabel('月份'); plt.show()\n"
             "import pytesseract\n"
             "from PIL import Image\n"
@@ -113,7 +115,7 @@ class SandboxTests(unittest.TestCase):
         )
         self.assertEqual(result["exit_code"], 0, result["stderr"])
         # A missing font logs "Glyph ... missing" per character instead.
-        self.assertNotIn("Glyph", result["stderr"])
+        self.assertNotIn("Glyph", result["stderr"], result["stdout"])
         self.assertIn("outputs/figure-1.png", outputs(result))
         ocr = result["stdout"].strip().splitlines()[-1]
         self.assertIn("销售趋势", ocr.replace(" ", ""))
@@ -139,8 +141,8 @@ class SandboxTests(unittest.TestCase):
             "from reportlab.platypus import SimpleDocTemplate, Paragraph\n"
             "from reportlab.lib.styles import ParagraphStyle\n"
             "import docx, openpyxl, pdfplumber\n"
-            "pdfmetrics.registerFont(TTFont('NotoSC', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', subfontIndex=2))\n"
-            "style = ParagraphStyle('zh', fontName='NotoSC', fontSize=16)\n"
+            "pdfmetrics.registerFont(TTFont('CJK', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'))\n"
+            "style = ParagraphStyle('zh', fontName='CJK', fontSize=16)\n"
             "SimpleDocTemplate('outputs/report.pdf').build([Paragraph('中文销售额报告', style)])\n"
             "book = docx.Document(); book.add_paragraph('中文段落'); book.save('outputs/a.docx')\n"
             "sheet = openpyxl.Workbook(); sheet.active['A1'] = '中文合计'; sheet.save('outputs/b.xlsx')\n"

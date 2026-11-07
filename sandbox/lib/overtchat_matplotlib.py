@@ -6,13 +6,40 @@ program ends are saved too, unless the code already saved them itself.
 """
 
 import atexit
+import glob
 import os
 
+import matplotlib
+from matplotlib import font_manager
 from matplotlib.backend_bases import FigureManagerBase, _Backend
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 
 _savefig = Figure.savefig
+
+
+def _register_cjk_fonts() -> None:
+    """Add a CJK font matplotlib can actually read to the sans fallback.
+
+    The image's Noto CJK files are TTC/CFF, which matplotlib cannot load;
+    Droid Sans Fallback is a plain TrueType CJK font. Registration here is
+    independent of the injected matplotlibrc so charts keep working even if
+    that file is ever removed.
+    """
+    added = []
+    for path in sorted(glob.glob("/usr/share/fonts/truetype/*/*.ttf")):
+        try:
+            font_manager.fontManager.addfont(path)
+            added.append(font_manager.FontProperties(fname=path).get_name())
+        except Exception:
+            continue
+    if added:
+        sans = list(matplotlib.rcParams["font.sans-serif"])
+        sans.extend(name for name in added if name not in sans)
+        matplotlib.rcParams["font.sans-serif"] = sans
+
+
+_register_cjk_fonts()
 
 
 def _savefig_and_remember(self, *args, **kwargs):
