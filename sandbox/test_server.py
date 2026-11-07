@@ -109,7 +109,7 @@ class SandboxTests(unittest.TestCase):
             "print('SANS0 ' + ','.join(matplotlib.rcParams['font.sans-serif']))\n"
             "import matplotlib.pyplot as plt\n"
             "print('SANS1 ' + ','.join(matplotlib.rcParams['font.sans-serif']))\n"
-            "plt.plot([1, 2]); plt.title('销售趋势'); plt.xlabel('月份'); plt.show()\n"
+            "plt.plot([1, 2]); plt.title('销售趋势'); plt.xlabel('月份'); plt.gcf().tight_layout(); plt.show()\n"
             "import pytesseract\n"
             "from PIL import Image\n"
             "print(pytesseract.image_to_string(Image.open('outputs/figure-1.png'), lang='chi_sim'))\n"

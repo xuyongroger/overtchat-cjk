@@ -23,11 +23,13 @@ _cjk_families: list[str] = []
 
 
 def _register_cjk_fonts() -> None:
-    """Add a CJK font matplotlib can actually read to the sans fallback.
+    """Put a CJK font that covers Latin and digits first in the sans list.
 
-    The image's Noto CJK files are TTC/CFF; Droid Sans Fallback is a plain
-    TrueType CJK font. Registration here is independent of the injected
-    matplotlibrc so charts keep working even if that file is ever removed.
+    Noto Sans CJK is scanned from the image's TTC files (matplotlib reads
+    .ttc since 3.10) and covers CJK, Latin and digits in one face, which
+    avoids per-glyph fallback paths entirely (tight_layout measurements
+    included). Droid Sans Fallback is added via addfont and kept as a
+    fallback entry even though it lacks Latin glyphs.
     """
     for path in sorted(glob.glob(_DROID_GLOB)):
         try:
@@ -37,9 +39,15 @@ def _register_cjk_fonts() -> None:
                 _cjk_families.append(name)
         except Exception:
             continue
-    if _cjk_families:
+    known = {face.name for face in font_manager.fontManager.ttflist}
+    notos = sorted(name for name in known if name.startswith("Noto Sans CJK"))
+    preferred: list[str] = []
+    for name in ("Noto Sans CJK SC", *notos, *_cjk_families):
+        if name in known and name not in preferred:
+            preferred.append(name)
+    if preferred:
         sans = list(matplotlib.rcParams["font.sans-serif"])
-        sans.extend(name for name in _cjk_families if name not in sans)
+        sans = preferred + [name for name in sans if name not in preferred]
         matplotlib.rcParams["font.sans-serif"] = sans
 
 

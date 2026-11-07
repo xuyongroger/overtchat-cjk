@@ -45,12 +45,11 @@ MEMORY_BYTES = int(os.environ.get("SANDBOX_MEMORY_MB", "4096")) * 1024 * 1024
 DEFAULT_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "60"))
 MAX_TIMEOUT = int(os.environ.get("SANDBOX_MAX_TIMEOUT_SECONDS", "300"))
 # Written to MPLCONFIGDIR/matplotlibrc before each run, which matplotlib
-# reads on import. DejaVu stays first so Latin text keeps the default look
-# while CJK glyphs fall through: Noto CJK names cover images that register
-# TTC faces, and Droid Sans Fallback (a plain TTF) covers matplotlib, which
-# cannot use the Noto CJK TTC files. Family names matplotlib cannot find
+# reads on import. Noto Sans CJK SC covers CJK, Latin and digits in one
+# face and leads; the custom backend repeats this after pyplot import in
+# case this file is ever removed. Family names matplotlib cannot find
 # are skipped.
-MATPLOTLIBRC = "font.sans-serif: DejaVu Sans, Noto Sans CJK SC, Noto Sans CJK JP, Droid Sans Fallback, sans-serif\n"
+MATPLOTLIBRC = "font.sans-serif: Noto Sans CJK SC, Droid Sans Fallback, DejaVu Sans, sans-serif\n"
 
 MAX_PROCESSES = 64
 MAX_FILE_BYTES = 100 * 1024 * 1024
