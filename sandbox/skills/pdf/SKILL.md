@@ -1,6 +1,6 @@
 ---
 name: pdf
-description: Extract text and tables from PDFs, merge, split or rotate pages, render pages to images, and create PDFs.
+description: Extract text and tables from PDFs, merge, split or rotate pages, render pages to images, and create PDFs. Always read this guide before creating a PDF: Chinese text requires the two-font pattern (DejaVu for digits/Latin plus Droid for CJK) because a single CJK font silently renders digits blank.
 ---
 
 # PDF
