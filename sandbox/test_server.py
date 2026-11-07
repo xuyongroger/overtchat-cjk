@@ -142,10 +142,13 @@ class SandboxTests(unittest.TestCase):
             "from reportlab.pdfbase.ttfonts import TTFont\n"
             "from reportlab.platypus import SimpleDocTemplate, Paragraph\n"
             "from reportlab.lib.styles import ParagraphStyle\n"
+            "import re\n"
             "import docx, openpyxl, pdfplumber\n"
+            "pdfmetrics.registerFont(TTFont('Latin', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))\n"
             "pdfmetrics.registerFont(TTFont('CJK', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'))\n"
+            "zh = lambda t: re.sub('[ -~]+', lambda m: '<font face=\"Latin\">' + m.group() + '</font>', t)\n"
             "style = ParagraphStyle('zh', fontName='CJK', fontSize=16)\n"
-            "SimpleDocTemplate('outputs/report.pdf').build([Paragraph('中文销售额报告', style)])\n"
+            "SimpleDocTemplate('outputs/report.pdf').build([Paragraph(zh('中文销售额报告 2024年收入12.5%'), style)])\n"
             "book = docx.Document(); book.add_paragraph('中文段落'); book.save('outputs/a.docx')\n"
             "sheet = openpyxl.Workbook(); sheet.active['A1'] = '中文合计'; sheet.save('outputs/b.xlsx')\n"
             "with pdfplumber.open('outputs/report.pdf') as pdf:\n"
@@ -159,7 +162,11 @@ class SandboxTests(unittest.TestCase):
         )
         self.assertEqual(result["exit_code"], 0, result["stderr"])
         lines = [line.strip() for line in result["stdout"].splitlines() if line.strip()]
-        self.assertEqual(lines[0], "中文销售额报告")  # pdfplumber text extraction
+        # Droid Sans Fallback has no Latin glyphs; the DejaVu wrapper must
+        # keep digits and Latin readable in the embedded PDF.
+        self.assertIn("中文销售额报告", lines[0])  # pdfplumber text extraction
+        self.assertIn("2024", lines[0])
+        self.assertIn("12.5", lines[0])
         self.assertEqual(lines[1], "中文段落")  # Word round-trip
         self.assertEqual(lines[2], "中文合计")  # Excel round-trip
         # poppler rendered the CJK font, and OCR read the page back.

@@ -22,6 +22,16 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
 
 ## Create
 - Reports with styles, tables and images: reportlab's `SimpleDocTemplate` with `Paragraph`, `Table` and `Image` flowables.
-- Chinese text: the built-in fonts are Latin-only, so register one first. Embedding is the reliable choice: `pdfmetrics.registerFont(TTFont('CJK', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'))` (from `reportlab.pdfbase` and `reportlab.pdfbase.ttfonts`) and use `fontName='CJK'` in every style. Do not use the Noto CJK files: they are CFF outlines inside a TTC, which reportlab cannot embed. The predefined `UnicodeCIDFont('STSong-Light')` needs no file but embeds nothing, so renderers without a matching system font (e.g. poppler) can show it blank.
+- Chinese text: Droid Sans Fallback covers CJK but has no Latin or digits, and reportlab has no per-glyph fallback, so register two fonts and wrap the Latin runs:
+  ```python
+  pdfmetrics.registerFont(TTFont('Latin', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
+  pdfmetrics.registerFont(TTFont('CJK', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'))
+  import re
+  def zh(text):  # mixed-text wrapping for Paragraph markup
+      return re.sub('[\\x00-\\x7f]+', lambda m: f'<font face="Latin">{m.group()}</font>', text)
+  style = ParagraphStyle('zh', fontName='CJK', fontSize=12)
+  Paragraph(zh('销售额 2024 年增长 12.5%'), style)
+  ```
+  For bold, also register DejaVuSans-Bold.ttf and call `pdfmetrics.registerFontFamily('Latin', normal='Latin', bold='LatinB', italic='Latin', boldItalic='LatinB')`. Never pass `subsetAuto` to `TTFont` (it does not exist). The predefined `UnicodeCIDFont('STSong-Light')` embeds nothing and renders blank in poppler; the Noto CJK files are CFF-in-TTC and reportlab cannot embed them.
 - Put matplotlib charts into a PDF as PNG images: charts from PNG embed cleanly and Chinese labels already render (see the charts skill), while matplotlib's own PDF backend cannot embed the image's CJK font files.
 - From a Word or Markdown file on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/outputs input.docx`.
