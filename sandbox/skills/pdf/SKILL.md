@@ -11,7 +11,6 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
 - Tables: `page.extract_tables()`; check the result, because merged cells and headers often need cleanup in pandas.
 - Command line: `pdftotext -layout input.pdf -` prints text quickly.
 - Scanned pages have no text layer. Render them (`pdftoppm -r 200 -png in.pdf /mnt/data/tmp/page` or `pdf2image.convert_from_path(path, dpi=200)`) and run `pytesseract.image_to_string` on each image, with `lang='chi_sim'` for Chinese (`'chi_sim+eng'` when English also appears; the default is `eng`).
-- OCR every scanned page inside the sandbox, whatever the page count; do not hand rendered page images to the chat model for reading. For long documents OCR in batches (about 10-15 pages per run stays inside the default 60 s timeout) and write the extracted text to `/mnt/data/outputs/` so a later run continues where the last one stopped.
 
 ## Change
 - Merge, split, reorder or rotate with pypdf: `PdfReader`, `PdfWriter`, `writer.add_page(page)`, `page.rotate(90)`.
