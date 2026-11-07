@@ -485,7 +485,8 @@ links in an HTML document.
 `sandbox/` builds the optional code execution image in two tiers: `slim`
 (Python data, chart, image and document libraries, poppler, Tesseract OCR
 with English and Simplified Chinese data, and Noto CJK fonts) and `full`
-(adds pandoc, LibreOffice, ffmpeg and scientific libraries).
+(adds pandoc, LibreOffice and scientific libraries; unlike the upstream
+image, the CJK fork's full tier drops ffmpeg).
 `POST /run` takes Python code and input files and returns output and the files
 written to `outputs/`. Each run is a fresh user from a pool, with resource
 limits and a seccomp filter that denies network sockets and new namespaces;
