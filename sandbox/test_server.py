@@ -135,12 +135,12 @@ class SandboxTests(unittest.TestCase):
     def test_chinese_documents_round_trip(self):
         result = run(
             "from reportlab.pdfbase import pdfmetrics\n"
-            "from reportlab.pdfbase.cidfonts import UnicodeCIDFont\n"
+            "from reportlab.pdfbase.ttfonts import TTFont\n"
             "from reportlab.platypus import SimpleDocTemplate, Paragraph\n"
             "from reportlab.lib.styles import ParagraphStyle\n"
             "import docx, openpyxl, pdfplumber\n"
-            "pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))\n"
-            "style = ParagraphStyle('zh', fontName='STSong-Light', fontSize=16)\n"
+            "pdfmetrics.registerFont(TTFont('NotoSC', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', subfontIndex=2))\n"
+            "style = ParagraphStyle('zh', fontName='NotoSC', fontSize=16)\n"
             "SimpleDocTemplate('outputs/report.pdf').build([Paragraph('中文销售额报告', style)])\n"
             "book = docx.Document(); book.add_paragraph('中文段落'); book.save('outputs/a.docx')\n"
             "sheet = openpyxl.Workbook(); sheet.active['A1'] = '中文合计'; sheet.save('outputs/b.xlsx')\n"

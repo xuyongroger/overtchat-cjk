@@ -22,6 +22,6 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
 
 ## Create
 - Reports with styles, tables and images: reportlab's `SimpleDocTemplate` with `Paragraph`, `Table` and `Image` flowables.
-- Chinese text: the built-in fonts are Latin-only, so register one first: `pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))` (from `reportlab.pdfbase` and `reportlab.pdfbase.cidfonts`) and use `fontName='STSong-Light'` in every style. For an embedded font instead, register `TTFont('Noto', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', subfontIndex=2)` (index 2 is the Simplified Chinese face).
+- Chinese text: the built-in fonts are Latin-only, so register one first. Embedding is the reliable choice: `pdfmetrics.registerFont(TTFont('Noto', '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc', subfontIndex=2))` (from `reportlab.pdfbase` and `reportlab.pdfbase.ttfonts`; index 2 is the Simplified Chinese face) and use `fontName='Noto'` in every style. The predefined `UnicodeCIDFont('STSong-Light')` needs no file but embeds nothing, so renderers without a matching system font (e.g. poppler) can show it blank.
 - Put matplotlib charts into a PDF as PNG images: charts from PNG embed cleanly and Chinese labels already render (see the charts skill), while matplotlib's own PDF backend cannot embed the image's CJK font files.
 - From a Word or Markdown file on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/outputs input.docx`.

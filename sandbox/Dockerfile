@@ -2,8 +2,9 @@
 
 # Two published tiers share this file:
 #   slim (default): Python data, chart, image and document libraries, poppler,
-#                   Tesseract OCR (English and Simplified Chinese) and fonts
-#                   (including Noto CJK for Chinese text).
+#                   Tesseract OCR (English and Simplified Chinese) and fonts:
+#                   Noto CJK plus Droid Sans Fallback, the TTF matplotlib can
+#                   use for Chinese text.
 #   full:           slim plus pandoc, LibreOffice, ffmpeg and
 #                   scientific libraries.
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
@@ -24,7 +25,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libseccomp2 poppler-utils \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim \
-      fonts-liberation fonts-dejavu-core fonts-noto-cjk \
+      fonts-liberation fonts-dejavu-core fonts-noto-cjk fonts-droid-fallback \
  && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/overtchat/venv
