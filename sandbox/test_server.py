@@ -218,6 +218,84 @@ class SandboxTests(unittest.TestCase):
         self.assertIn("Quarterly report", result["stdout"])
         self.assertEqual(sorted(outputs(result)), ["outputs/report.docx", "outputs/report.pdf"])
 
+    # Layout preview chain (soffice -> pdf -> page image) must carry Chinese
+    # for every office format; run in the full job, where soffice exists.
+    @unittest.skipUnless(server.TIER == "full", "full tier only")
+    def test_full_tier_chinese_docx_layout_roundtrip(self):
+        result = run(
+            "import subprocess\n"
+            "import docx\n"
+            "book = docx.Document()\n"
+            "book.add_heading('中文销售简报', 1)\n"
+            "book.add_paragraph('2024年收入12.5%，环比回落。')\n"
+            "book.save('tmp/report.docx')\n"
+            "subprocess.run(['soffice', '--headless', '--convert-to', 'pdf', '--outdir', 'tmp',\n"
+            "                'tmp/report.docx'], check=True, capture_output=True)\n"
+            "subprocess.run(['pdftoppm', '-r', '150', '-png', '-f', '1', '-l', '1', 'tmp/report.pdf',\n"
+            "                'tmp/page'], check=True)\n"
+            "import glob, pdfplumber\n"
+            "with pdfplumber.open('tmp/report.pdf') as pdf:\n"
+            "    print(pdf.pages[0].extract_text())\n"
+            "print(sorted(glob.glob('tmp/page*.png')))\n",
+            timeout_seconds=180,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        compact = result["stdout"].replace(" ", "")
+        self.assertIn("中文销售简报", compact)
+        self.assertIn("2024年收入12.5%", compact)
+        self.assertIn("page-1.png", result["stdout"])
+
+    @unittest.skipUnless(server.TIER == "full", "full tier only")
+    def test_full_tier_chinese_xlsx_layout_roundtrip(self):
+        result = run(
+            "import subprocess\n"
+            "import openpyxl\n"
+            "sheet = openpyxl.Workbook()\n"
+            "sheet.active['A1'] = '中文合计'\n"
+            "sheet.active['B1'] = 1234.56\n"
+            "sheet.save('tmp/book.xlsx')\n"
+            "subprocess.run(['soffice', '--headless', '--convert-to', 'pdf', '--outdir', 'tmp',\n"
+            "                'tmp/book.xlsx'], check=True, capture_output=True)\n"
+            "subprocess.run(['pdftoppm', '-r', '150', '-png', '-f', '1', '-l', '1', 'tmp/book.pdf',\n"
+            "                'tmp/page'], check=True)\n"
+            "import glob, pdfplumber\n"
+            "with pdfplumber.open('tmp/book.pdf') as pdf:\n"
+            "    print(pdf.pages[0].extract_text())\n"
+            "print(sorted(glob.glob('tmp/page*.png')))\n",
+            timeout_seconds=180,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        compact = result["stdout"].replace(" ", "")
+        self.assertIn("中文合计", compact)
+        self.assertIn("1234.56", compact)
+        self.assertIn("page-1.png", result["stdout"])
+
+    @unittest.skipUnless(server.TIER == "full", "full tier only")
+    def test_full_tier_chinese_pptx_layout_roundtrip(self):
+        result = run(
+            "import subprocess\n"
+            "from pptx import Presentation\n"
+            "deck = Presentation()\n"
+            "slide = deck.slides.add_slide(deck.slide_layouts[0])\n"
+            "slide.shapes.title.text = '中文演示'\n"
+            "slide.placeholders[1].text = '2024年总结'\n"
+            "deck.save('tmp/deck.pptx')\n"
+            "subprocess.run(['soffice', '--headless', '--convert-to', 'pdf', '--outdir', 'tmp',\n"
+            "                'tmp/deck.pptx'], check=True, capture_output=True)\n"
+            "subprocess.run(['pdftoppm', '-r', '150', '-png', '-f', '1', '-l', '1', 'tmp/deck.pdf',\n"
+            "                'tmp/page'], check=True)\n"
+            "import glob, pdfplumber\n"
+            "with pdfplumber.open('tmp/deck.pdf') as pdf:\n"
+            "    print(pdf.pages[0].extract_text())\n"
+            "print(sorted(glob.glob('tmp/page*.png')))\n",
+            timeout_seconds=180,
+        )
+        self.assertEqual(result["exit_code"], 0, result["stderr"])
+        compact = result["stdout"].replace(" ", "")
+        self.assertIn("中文演示", compact)
+        self.assertIn("2024年总结", compact)
+        self.assertIn("page-1.png", result["stdout"])
+
     def test_cannot_open_network_sockets(self):
         result = run(
             "import socket, urllib.request\n"

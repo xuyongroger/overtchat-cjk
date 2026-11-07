@@ -11,7 +11,7 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
 - Tables: `page.extract_tables()`; check the result, because merged cells and headers often need cleanup in pandas.
 - Command line: `pdftotext -layout input.pdf -` prints text quickly.
 - Scanned pages have no text layer. Render them (`pdftoppm -r 200 -png in.pdf /mnt/data/tmp/page` or `pdf2image.convert_from_path(path, dpi=200)`) and run `pytesseract.image_to_string` on each image, with `lang='chi_sim'` for Chinese (`'chi_sim+eng'` when English also appears; the default is `eng`).
-- When the chat model can see images, saved rendered pages are returned to it directly (up to 4 per run): for a few pages, save them to `/mnt/data/outputs/` and read them yourself; keep pytesseract for long documents or text-only models.
+- OCR every scanned page inside the sandbox, whatever the page count; do not hand rendered page images to the chat model for reading. For long documents OCR in batches (about 10-15 pages per run stays inside the default 60 s timeout) and write the extracted text to `/mnt/data/outputs/` so a later run continues where the last one stopped.
 
 ## Change
 - Merge, split, reorder or rotate with pypdf: `PdfReader`, `PdfWriter`, `writer.add_page(page)`, `page.rotate(90)`.
@@ -39,4 +39,5 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
   ```
   `bulletText` bypasses zh(): set `bulletFontName='Latin'` when bullets are ●/•, and on a canvas use `setFont('Latin')` for mixed footer strings (or draw footers as Paragraphs) — a CJK-only font leaves those punctuation gaps silently blank. There is no CJK bold face installed: `<b>` only has effect inside DejaVu runs. Never pass `subsetAuto` to `TTFont` (it does not exist). The predefined `UnicodeCIDFont('STSong-Light')` embeds nothing and renders blank in poppler; the Noto CJK files are CFF-in-TTC and reportlab cannot embed them.
 - Put matplotlib charts into a PDF as PNG images: charts from PNG embed cleanly and Chinese labels already render (see the charts skill), while matplotlib's own PDF backend cannot embed the image's CJK font files.
+- Check every created PDF before delivering: render the first pages (`pdftoppm -r 100 -png -f 1 -l 3 report.pdf /mnt/data/tmp/check`), copy 1-3 pages into `/mnt/data/outputs/` so they come back as images, and look at the layout and Chinese text.
 - From a Word or Markdown file on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/outputs input.docx`.

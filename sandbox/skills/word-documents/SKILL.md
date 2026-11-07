@@ -18,5 +18,10 @@ description: Create, convert and edit Word (.docx) documents with python-docx, a
 ## Create from scratch
 Use python-docx for precise layout: `document.add_heading`, `add_paragraph(style="List Bullet")`, `add_table(rows, cols, style="Table Grid")`, `add_picture(path, width=Inches(6))`, `add_page_break()`.
 
+## Text inside images
+- A .docx is a zip: embedded pictures live under `word/media/`. Extract them to `/mnt/data/tmp/` (`zipfile.ZipFile(path).namelist()` and `read()`), OCR each with pytesseract (`lang='chi_sim'`, save the image to `outputs/` only when the user should see it), and merge those quotes with the text-layer reads.
+- Old binary .doc files: python-docx and pandoc cannot read them; convert first with `soffice --headless --convert-to docx --outdir /mnt/data/tmp file.doc`, then apply the same flows to the converted file.
+
 ## Check
-Reopen the output and print its paragraphs (`[p.text for p in Document(path).paragraphs]`) to confirm the change before reporting it.
+- Reopen the output and print its paragraphs (`[p.text for p in Document(path).paragraphs]`) to confirm the change before reporting it.
+- Layout check on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/tmp report.docx`, render pages with `pdftoppm` into `/mnt/data/outputs/` and look at them before delivering.

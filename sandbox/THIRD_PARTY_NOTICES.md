@@ -22,7 +22,6 @@ Debian packages carry their full copyright and license texts under
 | pdfplumber | slim, full | MIT |
 | LibreOffice | full | MPL-2.0 |
 | Tesseract OCR with its English and Simplified Chinese data | slim, full | Apache-2.0 |
-| ffmpeg (Debian build) | full | GPL-2.0-or-later |
 | Liberation, DejaVu and Noto CJK fonts | slim, full | OFL-1.1 and permissive font licenses |
 | Droid Sans Fallback font | slim, full | Apache-2.0 |
 | SciPy, scikit-learn, statsmodels | full | BSD-3-Clause |

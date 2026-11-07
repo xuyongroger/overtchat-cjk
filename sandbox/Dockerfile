@@ -6,8 +6,9 @@
 #                   Noto CJK (matplotlib's primary CJK font, it reads TTC
 #                   since 3.10) plus Droid Sans Fallback (a TTF reportlab can
 #                   embed; it has no Latin or digit glyphs).
-#   full:           slim plus pandoc, LibreOffice, ffmpeg and
-#                   scientific libraries.
+#   full:           slim plus pandoc, LibreOffice (writer, calc and impress)
+#                   and scientific libraries. The CJK fork drops ffmpeg: its
+#                   audio/video tasks are out of scope here.
 ARG PYTHON_IMAGE=python:3.12-slim-bookworm
 
 FROM ${PYTHON_IMAGE} AS runner-build
@@ -75,7 +76,6 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       pandoc \
       libreoffice-writer-nogui libreoffice-calc-nogui libreoffice-impress-nogui \
-      ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-full.txt /tmp/requirements-full.txt
