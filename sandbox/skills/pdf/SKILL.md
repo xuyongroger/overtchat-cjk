@@ -22,16 +22,21 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
 
 ## Create
 - Reports with styles, tables and images: reportlab's `SimpleDocTemplate` with `Paragraph`, `Table` and `Image` flowables.
-- Chinese text: Droid Sans Fallback covers CJK but has no Latin or digits, and reportlab has no per-glyph fallback, so register two fonts and wrap the Latin runs:
+- Chinese text: Droid Sans Fallback covers CJK but has no Latin, digits or general punctuation (— “” ‘’ … ●), and reportlab has no per-glyph fallback, so register two fonts and wrap every run Droid lacks. The wrapper must skip existing markup — wrapping `<b>`/`</b>` fragments crashes Paragraph parsing:
   ```python
   pdfmetrics.registerFont(TTFont('Latin', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
   pdfmetrics.registerFont(TTFont('CJK', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'))
   import re
-  def zh(text):  # mixed-text wrapping for Paragraph markup
-      return re.sub('[\\x00-\\x7f]+', lambda m: f'<font face="Latin">{m.group()}</font>', text)
+  _CJK = '\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff01-\uff60'
+  def zh(text):  # tag-safe mixed-text wrapping for Paragraph markup
+      parts = re.split(r'(<[^>]*>)', text)
+      for i, p in enumerate(parts):
+          if p and p[0] != '<':
+              parts[i] = re.sub('[^' + _CJK + ']+', lambda m: '<font face="Latin">' + m.group() + '</font>', p)
+      return ''.join(parts)
   style = ParagraphStyle('zh', fontName='CJK', fontSize=12)
-  Paragraph(zh('销售额 2024 年增长 12.5%'), style)
+  Paragraph(zh('● 销售额<b>增长 12.5%</b>——“主力”回落'), style)
   ```
-  For bold, also register DejaVuSans-Bold.ttf and call `pdfmetrics.registerFontFamily('Latin', normal='Latin', bold='LatinB', italic='Latin', boldItalic='LatinB')`. Never pass `subsetAuto` to `TTFont` (it does not exist). The predefined `UnicodeCIDFont('STSong-Light')` embeds nothing and renders blank in poppler; the Noto CJK files are CFF-in-TTC and reportlab cannot embed them.
+  `bulletText` bypasses zh(): set `bulletFontName='Latin'` when bullets are ●/•, and on a canvas use `setFont('Latin')` for mixed footer strings (or draw footers as Paragraphs) — a CJK-only font leaves those punctuation gaps silently blank. There is no CJK bold face installed: `<b>` only has effect inside DejaVu runs. Never pass `subsetAuto` to `TTFont` (it does not exist). The predefined `UnicodeCIDFont('STSong-Light')` embeds nothing and renders blank in poppler; the Noto CJK files are CFF-in-TTC and reportlab cannot embed them.
 - Put matplotlib charts into a PDF as PNG images: charts from PNG embed cleanly and Chinese labels already render (see the charts skill), while matplotlib's own PDF backend cannot embed the image's CJK font files.
 - From a Word or Markdown file on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/outputs input.docx`.
