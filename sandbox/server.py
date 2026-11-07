@@ -44,6 +44,14 @@ MAX_RUNS = int(os.environ.get("SANDBOX_MAX_RUNS", "4"))
 MEMORY_BYTES = int(os.environ.get("SANDBOX_MEMORY_MB", "4096")) * 1024 * 1024
 DEFAULT_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "60"))
 MAX_TIMEOUT = int(os.environ.get("SANDBOX_MAX_TIMEOUT_SECONDS", "300"))
+# Appended to stderr when a run fails; points at the conversation-lessons
+# guide. The guide itself is not in the skills list: it is read only when a
+# repeat failure calls for it.
+LESSONS_HINT = (
+    "[overtchat] If this is the second time the same failure has hit this "
+    "conversation, read /opt/overtchat/guides/lessons.md and maintain the "
+    "conversation's lessons.md as it describes before retrying.\n"
+)
 # Written to MPLCONFIGDIR/matplotlibrc before each run, which matplotlib
 # reads on import. Noto Sans CJK SC covers CJK, Latin and digits in one
 # face and leads; the custom backend repeats this after pyplot import in
@@ -378,6 +386,9 @@ def run(payload: dict) -> dict:
         duration_ms = round((time.monotonic() - started) * 1000)
         files, skipped = collect_outputs(root / "outputs", uid)
         status = process.returncode
+        stderr_text = stderr.text()
+        if status != 0:
+            stderr_text += LESSONS_HINT
         return {
             "exit_code": status if status >= 0 else None,
             "signal": signal.Signals(-status).name if status < 0 else None,
@@ -385,7 +396,7 @@ def run(payload: dict) -> dict:
             "duration_ms": duration_ms,
             "stdout": stdout.text(),
             "stdout_truncated": stdout.truncated,
-            "stderr": stderr.text(),
+            "stderr": stderr_text,
             "stderr_truncated": stderr.truncated,
             "files": files,
             "skipped_files": skipped,

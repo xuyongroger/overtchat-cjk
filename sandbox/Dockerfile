@@ -41,6 +41,7 @@ RUN /opt/overtchat/venv/bin/pip install -r /tmp/requirements-slim.txt \
 COPY --from=runner-build /src/runner /opt/overtchat/bin/runner
 COPY lib/ /opt/overtchat/lib/
 COPY skills/ /opt/overtchat/skills/
+COPY guides/ /opt/overtchat/guides/
 COPY server.py /opt/overtchat/server.py
 COPY THIRD_PARTY_NOTICES.md /opt/overtchat/THIRD_PARTY_NOTICES.md
 

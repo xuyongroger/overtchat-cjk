@@ -38,6 +38,11 @@ render Chinese without the run code touching fonts. Droid Sans Fallback
 (TTF, CJK-only) is registered as a fallback; reportlab needs a TTF to embed,
 which is why PDFs use DejaVu + Droid wrapping instead of Noto.
 Skills under `skills/*/SKILL.md` are listed by `GET /healthz`.
+Guides under `guides/` are deliberately not listed there: a failed run ends
+its stderr with a hint pointing at `guides/lessons.md`, the protocol by which
+run code keeps a per-conversation `lessons.md` (read the uploads copy, append
+a line, save under the same name to replace it), so the self-correction
+mechanism costs nothing until a run actually fails.
 
 ## Changes
 

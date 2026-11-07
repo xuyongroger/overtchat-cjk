@@ -57,6 +57,16 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(result["exit_code"], 1)
         self.assertIn("ValueError: bad input", result["stderr"])
 
+    def test_failed_runs_point_at_the_lessons_guide(self):
+        # stderr of a failed run carries the hint; a successful one does not,
+        # and the guide exists at the path the hint names (outside skills/).
+        failed = run("raise ValueError('boom')")
+        self.assertIn("/opt/overtchat/guides/lessons.md", failed["stderr"])
+        self.assertNotIn("guides/lessons.md", run("print('ok')")["stderr"])
+        guide = run("print(open('/opt/overtchat/guides/lessons.md').read())")
+        self.assertEqual(guide["exit_code"], 0, guide["stderr"])
+        self.assertIn("lessons.md", guide["stdout"])
+
     def test_reads_uploads_read_only_through_both_paths(self):
         result = run(
             "import pandas as pd\n"
