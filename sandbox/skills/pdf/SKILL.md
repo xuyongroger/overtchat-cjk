@@ -23,10 +23,15 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
 - Reports with styles, tables and images: reportlab's `SimpleDocTemplate` with `Paragraph`, `Table` and `Image` flowables.
 - Chinese text: Droid Sans Fallback covers CJK but has no Latin, digits or general punctuation (— “” ‘’ … ●), and reportlab has no per-glyph fallback, so register two fonts and wrap every run Droid lacks. The wrapper must skip existing markup — wrapping `<b>`/`</b>` fragments crashes Paragraph parsing:
   ```python
+  from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+  from reportlab.lib.styles import ParagraphStyle
+  from reportlab.pdfbase import pdfmetrics
+  from reportlab.pdfbase.ttfonts import TTFont
+  from reportlab.platypus import Paragraph
+  import re
   pdfmetrics.registerFont(TTFont('Latin', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))
   pdfmetrics.registerFont(TTFont('CJK', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'))
-  import re
-  _CJK = '\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff01-\uff60'
+  _CJK = '\u3000-\u303f\u3300-\u33ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff01-\uff60'
   def zh(text):  # tag-safe mixed-text wrapping for Paragraph markup
       parts = re.split(r'(<[^>]*>)', text)
       for i, p in enumerate(parts):
@@ -36,7 +41,8 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
   style = ParagraphStyle('zh', fontName='CJK', fontSize=12)
   Paragraph(zh('● 销售额<b>增长 12.5%</b>——“主力”回落'), style)
   ```
-  `bulletText` bypasses zh(): set `bulletFontName='Latin'` when bullets are ●/•, and on a canvas use `setFont('Latin')` for mixed footer strings (or draw footers as Paragraphs) — a CJK-only font leaves those punctuation gaps silently blank. There is no CJK bold face installed: `<b>` only has effect inside DejaVu runs. Never pass `subsetAuto` to `TTFont` (it does not exist). The predefined `UnicodeCIDFont('STSong-Light')` embeds nothing and renders blank in poppler; the Noto CJK files are CFF-in-TTC and reportlab cannot embed them.
+  Names used outside the snippet need their own imports too: `TA_*` alignment constants come from `reportlab.lib.enums` and are not builtins — a copied name without its import raises `NameError`.
+  `bulletText` bypasses zh(): set `bulletFontName='Latin'` when bullets are ●/•, and on a canvas use `setFont('Latin')` for mixed footer strings (or draw footers as Paragraphs) — a CJK-only font leaves those punctuation gaps silently blank. If digits or Latin words come back as empty boxes in a rendered PDF, some text skipped the split: never draw a mixed string in the CJK font directly. CJK compatibility symbols such as ㎡ (U+3300-U+33FF) are drawn by Droid but not by DejaVu, which is why that block is part of the CJK range above. If some other character still renders blank or boxed in a page image, neither font has it: rewrite it as plain words (平方米, 千瓦时). There is no CJK bold face installed, and do not "fix" that by moving Chinese into DejaVu runs so `<b>` works — DejaVu has no CJK glyphs, so the text silently disappears (white headers vanish into their own fill background). Keep CJK in the CJK font: in Paragraphs emphasise with size or colour instead of bold; on a canvas fake weight while keeping the font via `setTextRenderMode(2)` (fill and stroke) with a line width of about 0.2-0.3 pt. The value of `<font face>` must name a font registered earlier in the same program, so keep the `registerFont` lines together with the imports. Never pass `subsetAuto` to `TTFont` (it does not exist). The predefined `UnicodeCIDFont('STSong-Light')` embeds nothing and renders blank in poppler; the Noto CJK files are CFF-in-TTC and reportlab cannot embed them.
 - Put matplotlib charts into a PDF as PNG images: charts from PNG embed cleanly and Chinese labels already render (see the charts skill), while matplotlib's own PDF backend cannot embed the image's CJK font files.
 - Check every created PDF before delivering: render the first pages (`pdftoppm -r 100 -png -f 1 -l 3 report.pdf /mnt/data/tmp/check`), copy 1-3 pages into `/mnt/data/outputs/` so they come back as images, and look at the layout and Chinese text.
 - From a Word or Markdown file on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/outputs input.docx`.

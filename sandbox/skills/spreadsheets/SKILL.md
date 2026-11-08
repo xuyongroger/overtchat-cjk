@@ -8,6 +8,7 @@ description: Analyze CSV and Excel files with pandas, and write formatted .xlsx 
 ## Read
 - CSV: `pd.read_csv("/mnt/data/uploads/<name>.csv")`. If parsing fails, retry with `sep=None, engine="python"` or `encoding="latin-1"`.
 - Excel: `pd.read_excel(path, sheet_name=None)` returns every sheet as a dict.
+- Colours read back with openpyxl can be theme references, not RGB: `start_color.rgb` may return a descriptive string instead of an ARGB hex. Validate 6-8 hex digits before using the value, otherwise fall back to an explicit default colour.
 - Look before you compute: print `df.shape`, `df.dtypes` and `df.head()`. Convert numbers and dates explicitly with `pd.to_numeric(..., errors="coerce")` and `pd.to_datetime(..., errors="coerce")`.
 
 ## Analyze

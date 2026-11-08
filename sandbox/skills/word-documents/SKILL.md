@@ -25,3 +25,4 @@ Use python-docx for precise layout: `document.add_heading`, `add_paragraph(style
 ## Check
 - Reopen the output and print its paragraphs (`[p.text for p in Document(path).paragraphs]`) to confirm the change before reporting it.
 - Layout check on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/tmp report.docx`, render pages with `pdftoppm` into `/mnt/data/outputs/` and look at them before delivering.
+- Font substitution is expected: the sandbox ships Liberation, DejaVu, Noto CJK and Droid only, so a document's own fonts (SimSun/宋体, Microsoft YaHei/微软雅黑, DengXian/等线, Calibri) are absent and LibreOffice substitutes them. Page breaks may then shift against Word — that is substitution, not a defect. Judge the pages on overlaps, overflowing text and blank pages; do not "fix" pagination drift.

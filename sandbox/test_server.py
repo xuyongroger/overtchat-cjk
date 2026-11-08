@@ -156,7 +156,7 @@ class SandboxTests(unittest.TestCase):
             "import docx, openpyxl, pdfplumber\n"
             "pdfmetrics.registerFont(TTFont('Latin', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'))\n"
             "pdfmetrics.registerFont(TTFont('CJK', '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf'))\n"
-            "_CJK = '\\u3000-\\u303f\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff\\uff01-\\uff60'\n"
+            "_CJK = '\\u3000-\\u303f\\u3300-\\u33ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff\\uff01-\\uff60'\n"
             "def zh(t):\n"
             "    parts = re.split('(<[^>]*>)', t)\n"
             "    for i, p in enumerate(parts):\n"
@@ -164,7 +164,7 @@ class SandboxTests(unittest.TestCase):
             "            parts[i] = re.sub('[^' + _CJK + ']+', lambda m: '<font face=\"Latin\">' + m.group() + '</font>', p)\n"
             "    return ''.join(parts)\n"
             "style = ParagraphStyle('zh', fontName='CJK', fontSize=16)\n"
-            "SimpleDocTemplate('outputs/report.pdf').build([Paragraph(zh('● 中文销售额报告 2024年<b>收入12.5%</b>——“环比”回落…'), style)])\n"
+            "SimpleDocTemplate('outputs/report.pdf').build([Paragraph(zh('● 中文销售额报告 2024年<b>收入12.5%</b>——“环比”回落… 面积4,718.03㎡'), style)])\n"
             "book = docx.Document(); book.add_paragraph('中文段落'); book.save('outputs/a.docx')\n"
             "sheet = openpyxl.Workbook(); sheet.active['A1'] = '中文合计'; sheet.save('outputs/b.xlsx')\n"
             "with pdfplumber.open('outputs/report.pdf') as pdf:\n"
@@ -190,6 +190,7 @@ class SandboxTests(unittest.TestCase):
         self.assertIn("“环比”", compact)
         self.assertIn("●", compact)
         self.assertIn("…", compact)
+        self.assertIn("面积4,718.03㎡", compact)  # U+33A1 routes to Droid (DejaVu lacks it)
         self.assertEqual(lines[1], "中文段落")  # Word round-trip
         self.assertEqual(lines[2], "中文合计")  # Excel round-trip
         # poppler rendered the CJK font, and OCR read the page back.
