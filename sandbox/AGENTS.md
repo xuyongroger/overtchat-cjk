@@ -29,12 +29,12 @@ a run, and the image holds no credentials.
 The working directory contains `uploads/` (read-only inputs), `outputs/`
 (returned files) and `tmp/`. `/mnt/data` is a symlink to `/proc/self/cwd`, so
 `/mnt/data/uploads/...` works in every run without mount namespaces.
-`plt.show()` saves figures to `outputs/` through `lib/overtchat_matplotlib.py`.
-Every run gets an injected `matplotlibrc` in `MPLCONFIGDIR` that puts Noto
-Sans CJK SC (covers CJK, Latin and digits in one face; matplotlib reads TTC
-files since 3.10) first in the sans-serif list, and the backend module
-repeats this after pyplot import in case the file is ever removed, so charts
-render Chinese without the run code touching fonts. Droid Sans Fallback
+`plt.show()` saves figures to `outputs/` through `lib/overtchat_matplotlib.py`,
+and `lib/matplotlibrc` (loaded through MATPLOTLIBRC) lists DejaVu Sans and
+Noto Sans CJK SC under font.family so CJK labels render in both tiers; the
+backend module additionally puts Noto Sans CJK SC (covers CJK, Latin and
+digits in one face; matplotlib reads TTC files since 3.10) first in the
+sans-serif list in case that file is ever removed. Droid Sans Fallback
 (TTF, CJK-only) is registered as a fallback; reportlab needs a TTF to embed,
 which is why PDFs use DejaVu + Droid wrapping instead of Noto.
 Skills under `skills/*/SKILL.md` are listed by `GET /healthz`.

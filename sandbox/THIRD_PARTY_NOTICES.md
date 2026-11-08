@@ -14,6 +14,8 @@ Debian packages carry their full copyright and license texts under
 | libseccomp | slim, full | LGPL-2.1-only |
 | pandoc | slim, full | GPL-2.0-or-later |
 | poppler-utils | slim, full | GPL-2.0-only or GPL-3.0-only |
+| poppler-data (CMaps and encodings) | slim, full | BSD-3-Clause (Adobe CMaps), GPL-2.0 (Unicode maps), AGPL-3.0-or-later (one Ghostscript CMap) |
+| Noto CJK fonts | slim, full | OFL-1.1 |
 | numpy, pandas | slim, full | BSD-3-Clause |
 | matplotlib | slim, full | Matplotlib License (PSF-based) |
 | Pillow | slim, full | MIT-CMU |

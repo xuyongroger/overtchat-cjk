@@ -1,11 +1,12 @@
 # syntax=docker/dockerfile:1
 
 # Two published tiers share this file:
-#   slim (default): Python data, chart, image and document libraries, poppler,
-#                   Tesseract OCR (English and Simplified Chinese) and fonts:
-#                   Noto CJK (matplotlib's primary CJK font, it reads TTC
-#                   since 3.10) plus Droid Sans Fallback (a TTF reportlab can
-#                   embed; it has no Latin or digit glyphs).
+#   slim (default): Python data, chart, image and document libraries, poppler
+#                   with its CJK CMaps, Tesseract OCR (English and Simplified
+#                   Chinese) and fonts: Noto CJK (matplotlib's primary CJK
+#                   font, it reads TTC since 3.10) plus Droid Sans Fallback
+#                   (a TTF reportlab can embed; it has no Latin or digit
+#                   glyphs).
 #   full:           slim plus pandoc, LibreOffice (writer, calc and impress)
 #                   and scientific libraries. The CJK fork drops ffmpeg: its
 #                   audio/video tasks are out of scope here.
@@ -25,9 +26,10 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libseccomp2 poppler-utils \
+ && apt-get install -y --no-install-recommends libseccomp2 \
+      poppler-utils poppler-data fonts-noto-cjk fonts-droid-fallback \
       tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim \
-      fonts-liberation fonts-dejavu-core fonts-noto-cjk fonts-droid-fallback \
+      fonts-liberation fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/overtchat/venv
