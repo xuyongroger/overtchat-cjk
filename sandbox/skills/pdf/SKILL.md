@@ -10,7 +10,7 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
 - Chinese and other CJK text extracts as-is: the text layer carries Unicode, so reading needs no fonts.
 - Tables: `page.extract_tables()`; check the result, because merged cells and headers often need cleanup in pandas.
 - Command line: `pdftotext -layout input.pdf -` prints text quickly.
-- Scanned pages have no text layer. Render them (`pdftoppm -r 200 -png in.pdf /mnt/data/tmp/page` or `pdf2image.convert_from_path(path, dpi=200)`) and run `pytesseract.image_to_string` on each image, with `lang='chi_sim'` for Chinese (`'chi_sim+eng'` when English also appears; the default is `eng`).
+- Scanned pages have no text layer. Render them (`pdftoppm -r 200 -png in.pdf /mnt/data/tmp/page` or `pdf2image.convert_from_path(path, dpi=200)`) and run `pytesseract.image_to_string` on each image, with `lang='chi_sim'` for Chinese (`'chi_sim+eng'` when English also appears; the default is `eng`). The `pdftoppm` path is an output **prefix without an extension**: poppler names the images `page-1.png`, `page-2.png` itself, so adding `.png` to the prefix gives `page.png-1.png`.
 
 ## Change
 - Merge, split, reorder or rotate with pypdf: `PdfReader`, `PdfWriter`, `writer.add_page(page)`, `page.rotate(90)`.
@@ -44,5 +44,14 @@ description: Extract text and tables from PDFs, merge, split or rotate pages, re
   Names used outside the snippet need their own imports too: `TA_*` alignment constants come from `reportlab.lib.enums` and are not builtins — a copied name without its import raises `NameError`.
   `bulletText` bypasses zh(): set `bulletFontName='Latin'` when bullets are ●/•, and on a canvas use `setFont('Latin')` for mixed footer strings (or draw footers as Paragraphs) — a CJK-only font leaves those punctuation gaps silently blank. If digits or Latin words come back as empty boxes in a rendered PDF, some text skipped the split: never draw a mixed string in the CJK font directly. CJK compatibility symbols such as ㎡ (U+3300-U+33FF) are drawn by Droid but not by DejaVu, which is why that block is part of the CJK range above. If some other character still renders blank or boxed in a page image, neither font has it: rewrite it as plain words (平方米, 千瓦时). There is no CJK bold face installed, and do not "fix" that by moving Chinese into DejaVu runs so `<b>` works — DejaVu has no CJK glyphs, so the text silently disappears (white headers vanish into their own fill background). Keep CJK in the CJK font: in Paragraphs emphasise with size or colour instead of bold; on a canvas fake weight while keeping the font via `setTextRenderMode(2)` (fill and stroke) with a line width of about 0.2-0.3 pt. The value of `<font face>` must name a font registered earlier in the same program, so keep the `registerFont` lines together with the imports. Never pass `subsetAuto` to `TTFont` (it does not exist). The predefined `UnicodeCIDFont('STSong-Light')` embeds nothing and renders blank in poppler; the Noto CJK files are CFF-in-TTC and reportlab cannot embed them.
 - Put matplotlib charts into a PDF as PNG images: charts from PNG embed cleanly and Chinese labels already render (see the charts skill), while matplotlib's own PDF backend cannot embed the image's CJK font files.
-- Check every created PDF before delivering: render the first pages (`pdftoppm -r 100 -png -f 1 -l 3 report.pdf /mnt/data/tmp/check`), copy 1-3 pages into `/mnt/data/outputs/` so they come back as images, and look at the layout and Chinese text.
+- Check every created PDF before delivering: render the first pages with `pdftoppm -r 100 -png -f 1 -l 3 /mnt/data/outputs/report.pdf /mnt/data/tmp/check`, copy 1-3 pages into `/mnt/data/outputs/` so they come back as images, and look at the layout and Chinese text. The last argument is an output **prefix without an extension**: poppler appends `-1.png`, `-2.png` itself, so a prefix written as `check.png` yields `check.png-1.png` and a search for `check-*.png` then finds nothing. Keep every option before the two paths and give each one its space (`-r 100`, never `-r100`), and run it as a list with `check=True` so a usage error fails loudly instead of leaving zero pages and no message:
+  ```python
+  import glob, shutil, subprocess
+  subprocess.run(['pdftoppm', '-r', '100', '-png', '-f', '1', '-l', '3',
+                  '/mnt/data/outputs/report.pdf', '/mnt/data/tmp/check'], check=True)
+  pages = sorted(glob.glob('/mnt/data/tmp/check-*.png'))
+  assert pages, 'pdftoppm rendered nothing: re-check the PDF path and the prefix'
+  for page in pages:
+      shutil.copy(page, '/mnt/data/outputs/')
+  ```
 - From a Word or Markdown file on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/outputs input.docx`.
