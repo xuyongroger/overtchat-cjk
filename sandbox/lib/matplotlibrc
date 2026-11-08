@@ -1,12 +1,16 @@
 # Defaults for sandbox runs, loaded through MATPLOTLIBRC before user code runs.
 # Code that sets its own rcParams still wins.
 
-# A list of concrete families enables glyph fallback: Latin text keeps DejaVu
-# Sans and CJK text falls through to Noto. A generic family such as sans-serif
-# resolves to its first installed entry only, so it would leave CJK as boxes.
-# (The upstream order is load-bearing: test_server asserts it verbatim.)
-font.family: DejaVu Sans, Noto Sans CJK SC
-# The fork also reorders the sans-serif list so a bare 'sans-serif' family
+# A list of concrete families enables glyph fallback. A generic family such
+# as sans-serif resolves to its first installed entry only, so it would leave
+# CJK as boxes. Fork deviation from the upstream order (Noto leads, not trails):
+# with DejaVu Sans first, per-glyph fallback silently draws unreadable tofu for
+# pure-CJK strings on these fonts (measured 2026-11: tesseract reads nothing),
+# yet emits no "Glyph ... missing" warning, so only an OCR check catches it.
+# test_server's chart OCR test is the guard; the verbatim font.family assertion
+# in test_renders_cjk_text_in_charts was adjusted to this order.
+font.family: Noto Sans CJK SC, DejaVu Sans
+# The sans-serif list is reordered the same way so a bare 'sans-serif' family
 # resolves to Noto first (covers CJK, Latin and digits in one face; Droid is
 # the TTF fallback for anything Noto lacks). Backend repeats this after pyplot
 # import in case run code resets rcParams.

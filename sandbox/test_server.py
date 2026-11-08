@@ -135,6 +135,9 @@ class SandboxTests(unittest.TestCase):
     def test_renders_cjk_text_in_charts(self):
         # Matplotlib warns on stderr about every glyph a font lacks, so a
         # silent run with the CJK face resolved is a rendered title, not boxes.
+        # (Fork note: silence alone is not proof - a leading DejaVu Sans makes
+        # pure-CJK fallback silent but unreadable; the font.family assertion
+        # below therefore pins the fork's Noto-first order.)
         result = run(
             "import matplotlib\n"
             "from matplotlib import font_manager\n"
@@ -147,7 +150,7 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(result["exit_code"], 0, result["stderr"])
         self.assertEqual(result["stderr"], "")
         lines = result["stdout"].splitlines()
-        self.assertEqual(lines[0], "['DejaVu Sans', 'Noto Sans CJK SC']")
+        self.assertEqual(lines[0], "['Noto Sans CJK SC', 'DejaVu Sans']")  # fork order, see lib/matplotlibrc
         self.assertEqual(lines[1], "False")
         self.assertIn("NotoSansCJK", lines[2])
         self.assertTrue(outputs(result)["outputs/figure-1.png"].startswith(b"\x89PNG"))
