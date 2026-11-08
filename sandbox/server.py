@@ -52,12 +52,6 @@ LESSONS_HINT = (
     "conversation, read /opt/overtchat/guides/lessons.md and maintain the "
     "conversation's lessons.md as it describes before retrying.\n"
 )
-# Written to MPLCONFIGDIR/matplotlibrc before each run, which matplotlib
-# reads on import. Noto Sans CJK SC covers CJK, Latin and digits in one
-# face and leads; the custom backend repeats this after pyplot import in
-# case this file is ever removed. Family names matplotlib cannot find
-# are skipped.
-MATPLOTLIBRC = "font.sans-serif: Noto Sans CJK SC, Droid Sans Fallback, DejaVu Sans, sans-serif\n"
 
 MAX_PROCESSES = 64
 MAX_FILE_BYTES = 100 * 1024 * 1024
@@ -316,13 +310,11 @@ def run(payload: dict) -> dict:
         for writable in ("outputs", "tmp", "tmp/config", "tmp/cache"):
             os.mkdir(root / writable, 0o700)
             os.chown(root / writable, uid, uid)
+        # Matplotlib keeps its font cache under MPLCONFIGDIR; the rc defaults
+        # come from lib/matplotlibrc through the MATPLOTLIBRC variable.
         mpl_config = root / "tmp" / "matplotlib"
         os.mkdir(mpl_config, 0o700)
         os.chown(mpl_config, uid, uid)
-        matplotlibrc = mpl_config / "matplotlibrc"
-        matplotlibrc.write_text(MATPLOTLIBRC, encoding="utf-8")
-        os.chown(matplotlibrc, uid, uid)
-        os.chmod(matplotlibrc, 0o444)
         script = root / ".main.py"
         script.write_text(code, encoding="utf-8")
         os.chmod(script, 0o444)
