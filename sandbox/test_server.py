@@ -195,8 +195,12 @@ class SandboxTests(unittest.TestCase):
         self.assertIn("面积4,718.03㎡", compact)  # U+33A1 routes to Droid (DejaVu lacks it)
         self.assertIn("中文段落", compact)  # Word round-trip
         self.assertIn("中文合计", compact)  # Excel round-trip
-        # poppler rendered the CJK font, and OCR read the page back.
-        self.assertIn("中文销售额报告", lines[-1].replace(" ", ""))
+        # poppler rendered the CJK font and OCR read the page back; tesseract
+        # garbles individual CJK glyphs unpredictably, so anchor on the stable
+        # digit+CJK run instead of the title.
+        ocr_start = lines.index("中文合计") + 1
+        ocr = "".join("".join(lines[ocr_start:]).split())
+        self.assertIn("2024年收入", ocr)
         self.assertEqual(
             sorted(outputs(result)), ["outputs/a.docx", "outputs/b.xlsx", "outputs/report.pdf"]
         )
