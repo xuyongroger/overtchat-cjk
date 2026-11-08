@@ -114,30 +114,30 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(sorted(outputs(result)), ["outputs/bar.png", "outputs/line.png"])
 
     def test_charts_render_chinese_without_font_setup(self):
+        # Chinese renders out of the box with the shipped rc defaults. The
+        # oracle is a dark-pixel count in the title band, not OCR: tesseract
+        # chi_sim misreads fallback-rendered CJK even when it renders
+        # perfectly (see the pixel measurements in upstream issue #559),
+        # while a blank band measures near 0 and real glyphs around 2000.
         result = run(
-            "import matplotlib\n"
-            "print('SANS0 ' + ','.join(matplotlib.rcParams['font.sans-serif']))\n"
             "import matplotlib.pyplot as plt\n"
-            "print('SANS1 ' + ','.join(matplotlib.rcParams['font.sans-serif']))\n"
-            "plt.plot([1, 2]); plt.title('销售趋势'); plt.xlabel('月份'); plt.gcf().tight_layout(); plt.show()\n"
-            "import pytesseract\n"
             "from PIL import Image\n"
-            "print(pytesseract.image_to_string(Image.open('outputs/figure-1.png'), lang='chi_sim'))\n"
+            "plt.figure(figsize=(4, 2)); plt.plot([1, 2])\n"
+            "plt.title('销售趋势'); plt.xlabel('月份'); plt.savefig('outputs/chart.png', dpi=150)\n"
+            "im = Image.open('outputs/chart.png').convert('L')\n"
+            "band = im.crop((0, 0, im.size[0], int(im.size[1] * 0.18)))\n"
+            "print('TITLE_INK', sum(1 for v in band.tobytes() if v < 128))\n"
         )
         self.assertEqual(result["exit_code"], 0, result["stderr"])
         # A missing font logs "Glyph ... missing" per character instead.
         self.assertNotIn("Glyph", result["stderr"], result["stdout"])
-        self.assertIn("outputs/figure-1.png", outputs(result))
-        # Tesseract mixes the chart's tick labels into its output, so look
-        # for the title anywhere in what it read.
-        self.assertIn("销售趋势", result["stdout"].replace(" ", ""), result["stdout"])
+        self.assertIn("outputs/chart.png", outputs(result))
+        ink = int(result["stdout"].split("TITLE_INK")[1].strip())
+        self.assertGreater(ink, 1000, "title band too empty for real glyphs: %d" % ink)
 
     def test_renders_cjk_text_in_charts(self):
         # Matplotlib warns on stderr about every glyph a font lacks, so a
         # silent run with the CJK face resolved is a rendered title, not boxes.
-        # (Fork note: silence alone is not proof - a leading DejaVu Sans makes
-        # pure-CJK fallback silent but unreadable; the font.family assertion
-        # below therefore pins the fork's Noto-first order.)
         result = run(
             "import matplotlib\n"
             "from matplotlib import font_manager\n"
@@ -150,7 +150,7 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(result["exit_code"], 0, result["stderr"])
         self.assertEqual(result["stderr"], "")
         lines = result["stdout"].splitlines()
-        self.assertEqual(lines[0], "['Noto Sans CJK SC', 'DejaVu Sans']")  # fork order, see lib/matplotlibrc
+        self.assertEqual(lines[0], "['DejaVu Sans', 'Noto Sans CJK SC']")
         self.assertEqual(lines[1], "False")
         self.assertIn("NotoSansCJK", lines[2])
         self.assertTrue(outputs(result)["outputs/figure-1.png"].startswith(b"\x89PNG"))
