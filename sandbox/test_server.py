@@ -168,7 +168,8 @@ class SandboxTests(unittest.TestCase):
             "book = docx.Document(); book.add_paragraph('中文段落'); book.save('outputs/a.docx')\n"
             "sheet = openpyxl.Workbook(); sheet.active['A1'] = '中文合计'; sheet.save('outputs/b.xlsx')\n"
             "with pdfplumber.open('outputs/report.pdf') as pdf:\n"
-            "    print(pdf.pages[0].extract_text())\n"
+            "    for pg in pdf.pages:\n"
+            "        print(pg.extract_text() or '')\n"
             "print(docx.Document('outputs/a.docx').paragraphs[0].text)\n"
             "print(openpyxl.load_workbook('outputs/b.xlsx').active['A1'].value)\n"
             "from pdf2image import convert_from_path\n"
@@ -180,9 +181,10 @@ class SandboxTests(unittest.TestCase):
         lines = [line.strip() for line in result["stdout"].splitlines() if line.strip()]
         # Droid Sans Fallback has no Latin, digit or general-punctuation
         # glyphs; the tag-safe DejaVu wrapper must keep them all in the PDF,
-        # including around <b> markup (font switches can add spacing, so
-        # compare without spaces).
-        compact = lines[0].replace(" ", "")
+        # including around <b> markup (font switches can add spacing, and the
+        # long sentence wraps onto a second page, so compare the whole
+        # whitespace-stripped output).
+        compact = "".join(result["stdout"].split())
         self.assertIn("中文销售额报告", compact)  # pdfplumber text extraction
         self.assertIn("2024", compact)
         self.assertIn("12.5", compact)
@@ -191,8 +193,8 @@ class SandboxTests(unittest.TestCase):
         self.assertIn("●", compact)
         self.assertIn("…", compact)
         self.assertIn("面积4,718.03㎡", compact)  # U+33A1 routes to Droid (DejaVu lacks it)
-        self.assertEqual(lines[1], "中文段落")  # Word round-trip
-        self.assertEqual(lines[2], "中文合计")  # Excel round-trip
+        self.assertIn("中文段落", compact)  # Word round-trip
+        self.assertIn("中文合计", compact)  # Excel round-trip
         # poppler rendered the CJK font, and OCR read the page back.
         self.assertIn("中文销售额报告", lines[-1].replace(" ", ""))
         self.assertEqual(
