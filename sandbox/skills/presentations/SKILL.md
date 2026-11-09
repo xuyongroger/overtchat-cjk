@@ -11,4 +11,5 @@ description: Create and edit PowerPoint (.pptx) decks with python-pptx.
 - Images and charts: save the chart as PNG first, then `slide.shapes.add_picture(path, left, top, width=Inches(8))`.
 - Tables: `slide.shapes.add_table(rows, cols, left, top, width, height).table`.
 - On the full image, check the result by converting it: `soffice --headless --convert-to pdf --outdir /mnt/data/tmp deck.pptx`, then render pages with `pdftoppm`.
+- Files from earlier runs are in `/mnt/data/uploads/`, never in `outputs/`: a run's returned files are the only thing that survives into the next run, so reopen them from `uploads/` (list it for exact names).
 - Text inside images: a .pptx is a zip; pictures live under `ppt/media/` — extract them to `/mnt/data/tmp/` and OCR with pytesseract (`lang='chi_sim'`). Old .ppt files: convert with `soffice --headless --convert-to pptx --outdir /mnt/data/tmp deck.ppt` first.

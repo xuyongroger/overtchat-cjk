@@ -23,6 +23,7 @@ description: Analyze CSV and Excel files with pandas, and write formatted .xlsx 
 - To edit an existing workbook and keep its formatting, open it with `openpyxl.load_workbook` and save to outputs under a new name.
 
 ## Check
+- Files from earlier runs are in `/mnt/data/uploads/`, never in `outputs/`: a run's returned files are the only thing that survives into the next run, so reopen them from `uploads/` (list it for exact names).
 - Reopen the saved file and print its sheet names and first rows before telling the user it is ready.
 - Layout check on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/tmp book.xlsx`, then `pdftoppm` the PDF into `/mnt/data/outputs/` to look at formatting. Calc paginates like printing: a wide sheet spans several pages, which is print semantics, not a broken file.
 - Text inside embedded images: an .xlsx is a zip; pictures live under `xl/media/` — extract to `/mnt/data/tmp/` and OCR with pytesseract (`lang='chi_sim'`). Old .xls files: convert with `soffice --headless --convert-to xlsx --outdir /mnt/data/tmp file.xls` first.

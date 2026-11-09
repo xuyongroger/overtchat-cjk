@@ -23,6 +23,7 @@ Use python-docx for precise layout: `document.add_heading`, `add_paragraph(style
 - Old binary .doc files: python-docx and pandoc cannot read them; convert first with `soffice --headless --convert-to docx --outdir /mnt/data/tmp file.doc`, then apply the same flows to the converted file.
 
 ## Check
+- Files from earlier runs are in `/mnt/data/uploads/`, never in `outputs/`: a run's returned files are the only thing that survives into the next run, so reopen them from `uploads/` (list it for exact names).
 - Reopen the output and print its paragraphs (`[p.text for p in Document(path).paragraphs]`) to confirm the change before reporting it.
 - Layout check on the full image: `soffice --headless --convert-to pdf --outdir /mnt/data/tmp report.docx`, render pages with `pdftoppm` into `/mnt/data/outputs/` and look at them before delivering.
 - Font substitution is expected: the sandbox ships Liberation, DejaVu, Noto CJK and Droid only, so a document's own fonts (SimSun/宋体, Microsoft YaHei/微软雅黑, DengXian/等线, Calibri) are absent and LibreOffice substitutes them. Page breaks may then shift against Word — that is substitution, not a defect. Judge the pages on overlaps, overflowing text and blank pages; do not "fix" pagination drift.
