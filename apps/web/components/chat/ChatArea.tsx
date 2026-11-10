@@ -31,6 +31,8 @@ import {
 import { useSelectedModel } from "@/lib/model-config/client";
 import { useModelConfigs } from "@/lib/queries/modelConfigs";
 import { useOptionalProject } from "@/lib/queries/projects";
+import { ProjectSaveProvider } from "@/components/projects/ProjectSaveContext";
+import { useProjectFiles } from "@/lib/queries/project-files";
 import {
   activityKeys,
   chatKeys,
@@ -164,6 +166,7 @@ export function ChatArea({
   const { openPalette } = useSidebar();
   const { data: chats } = useChats();
   const { data: project } = useOptionalProject(projectId);
+  const { data: projectFiles } = useProjectFiles(project?.id);
 
   const { data: modelsData, isError: modelsError } = useModelConfigs();
   const models = modelsError ? [] : (modelsData ?? null);
@@ -511,7 +514,7 @@ export function ChatArea({
                 : !modelSupportsSearch
                   ? `${connector.title} is unavailable for this model`
                   : connection.alwaysOn
-                    ? "On in every chat"
+                    ? "Always available"
                     : usedHere
                       ? "On for this chat"
                       : undefined,
@@ -572,9 +575,24 @@ export function ChatArea({
     () => ({ activeFileId: fileTarget?.id ?? null, open: openFile }),
     [fileTarget, openFile],
   );
+  // Panels offer "Save to project" for documents and files of a project chat.
+  const projectSaveTarget = useMemo(
+    () =>
+      project && !temporary
+        ? { chatId, project: { id: project.id, name: project.name } }
+        : null,
+    [chatId, project, temporary],
+  );
   // Calls already saved when the chat opens never open the panel by themselves.
   const handledDocumentCalls = useRef<Set<string> | null>(null);
+  // Message updates are throttled but status is not, so a call that arrives
+  // in one chunk can first render together with the finished status. Look at
+  // the reply once more when the stream ends so it is followed then rather
+  // than on the next send, when the previous reply is briefly still last.
+  const wasStreaming = useRef(false);
   useEffect(() => {
+    const finished = wasStreaming.current && !streaming;
+    wasStreaming.current = streaming;
     if (handledDocumentCalls.current === null) {
       handledDocumentCalls.current = new Set(
         messages.flatMap((message) =>
@@ -585,7 +603,7 @@ export function ChatArea({
       );
       return;
     }
-    if (!streaming) return;
+    if (!streaming && !finished) return;
     const openPart = documentTarget
       ? findDocumentPart(messages, documentTarget)
       : undefined;
@@ -907,6 +925,7 @@ export function ChatArea({
                 : "Realtime voice is unavailable"
       }
       attachmentsEnabled={!voiceActive}
+      projectFiles={projectFiles}
       textInputDisabled={voiceEnding}
       commandActions={{
         compact:
@@ -972,6 +991,7 @@ export function ChatArea({
   return (
     <DocumentPanelProvider value={documentPanel}>
     <FilePanelProvider value={filePanel}>
+    <ProjectSaveProvider value={projectSaveTarget}>
     <div className="relative flex min-w-0 flex-1 overflow-hidden">
     <div
       data-titlebar-interior={panel ? "" : undefined}
@@ -1113,6 +1133,7 @@ export function ChatArea({
     )}
     {fileTarget && <FilePanel file={fileTarget} onBack={showFiles} onClose={closePanel} />}
     </div>
+    </ProjectSaveProvider>
     </FilePanelProvider>
     </DocumentPanelProvider>
   );
