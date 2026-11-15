@@ -632,9 +632,23 @@ secret never appear in an API response.
 
 A user with a live connection is offered `gmail_search`, `gmail_read_thread`,
 `gmail_read_attachment`, `gmail_list_labels`, `gmail_modify_labels` and
-`gmail_create_draft` (`lib/integrations/gmail-tools.ts`) along with a system
+`gmail_compose` (`lib/integrations/gmail-tools.ts`) along with a system
 prompt that marks mail and its attachments as untrusted. There is no send
-tool, by design, and nothing deletes mail for good. Thread bodies are capped per message and per thread, newest kept.
+tool, by design, and nothing deletes mail for good. `gmail_compose` checks an
+email against the mailbox and names it with an `emailId`; it writes nothing to
+Gmail. A client says it can show such an email with `gmailComposeSupported`
+in the chat request. One that does not, or a voice turn, is offered
+`gmail_create_draft` instead, which saves a draft in Gmail. That tool is left
+out of the definitions a composing client's model reads but still runs, since
+a chat that loaded Gmail earlier keeps the instructions that name it.
+
+`gmail_send` exists only for a user who chose **Without asking** under
+**Sending** (`integration_accounts.send_without_asking`, set through
+`PATCH /api/integrations/gmail`). `createGmailTools()` leaves the tool out
+otherwise, so no prompt or stale instruction can reach a send. It sends at
+once through `sendGmailEmail()`, the same code the card's **Send** uses, and
+its finished call shows as a sent card. `saveIntegrationAccount()` clears the
+choice when the sign-in is for a different address. Thread bodies are capped per message and per thread, newest kept.
 An attachment is named by its part's position in the message, because Gmail's
 own attachment IDs change with every request; its text comes from
 `extractFile()`, the same extraction uploads use, in parts of 60,000
@@ -643,7 +657,7 @@ not listed as attachments. `gmail_modify_labels` changes whole threads and
 accepts any label by name or ID, `TRASH` and `SPAM` included; when Gmail fails
 partway, the error says how many threads were already changed. A
 request Gmail answers with 401 discards the access token and repeats once, so a
-dead grant surfaces as `needs_reconnect`. Draft recipients must be bare
+dead grant surfaces as `needs_reconnect`. An email's recipients must be bare
 addresses and headers are refused if they contain a line break.
 
 A sign-in that covers the calendar is offered `calendar_list_calendars`,
@@ -691,14 +705,29 @@ ended, the skill's text is `gmailReconnectPrompt()` or
 `calendarReconnectPrompt()` and it provides no tools. The composer reads its
 connectors from `CHAT_CONNECTORS` (`components/chat/chat-connectors.tsx`).
 
-A saved draft is not a timeline step: `groupMessageParts()` gives it its own
-segment, and the web and mobile cards show its subject, recipients and body.
-The web card's **Send** posts to `/api/integrations/gmail/drafts/[draftId]/send`,
-the only code that sends mail and one no tool reaches. `sendSavedGmailDraft()`
-sends a draft once however often it is asked and records it in
-`gmail_sent_drafts`. The chat's stored tool result is never changed, so what a
-model reads stays the same; `withSentGmailDrafts()` marks sent drafts in the
-messages a client loads.
+An email a model finished writing is not a timeline step:
+`groupMessageParts()` gives it its own segment, and the web and mobile cards
+show its subject, recipients and body (`describeGmailEmail()`). The card's
+**Send** posts the email to `/api/integrations/gmail/emails/[emailId]/send`
+and **Save to Gmail** to `.../emails/[emailId]/draft`; these and the draft
+route below are the only code that sends mail or saves a draft for a card, and
+no tool reaches them. `sendComposedGmailEmail()` and
+`saveComposedGmailEmail()` (`lib/integrations/gmail-emails.ts`) act once
+however often they are asked: requests for one email run one at a time in the
+server process, and the outcome is recorded in `gmail_emails`. An email the
+user saved in Gmail is sent as that draft, so edits made in Gmail go out. A
+later `gmail_compose` call names the version it rewrites in `replaces`, and
+`replacedGmailEmailIds()` lets the earlier card stop offering Send. What a
+card's own request came back with is kept in `rememberGmailEmailResult()`
+rather than in the card, because both chat lists drop or recycle cards that
+scroll out of view.
+
+A draft saved by `gmail_create_draft` has the same card. Its **Send** posts to
+`/api/integrations/gmail/drafts/[draftId]/send`; `sendSavedGmailDraft()`
+sends it once however often it is asked and records it in
+`gmail_sent_drafts`. In both cases the chat's stored tool result is never
+changed, so what a model reads stays the same; `withGmailEmailState()` marks
+saved and sent emails in the messages a client loads.
 
 `describeGmailToolPart()` in `@overtchat/shared` projects a step for the web
 and mobile timelines from senders and subjects only, and
@@ -1614,6 +1643,31 @@ paste, copy/selection, panel resizing, concurrent views, long-running output and
 reconnects. Report real SSH/network timings separately from local rendering
 latency. Run the [Windows SSH checks](#windows-ssh-validation) for Windows
 workspace targets. Native mobile terminal UI remains outside this feature's scope.
+
+### Workspace file preview validation
+
+The files pane reads through one host script, run under the host's own Node for
+local, SSH and Windows targets. Text previews are capped at 512 KB. Connectors
+with `workspace-files-v2` also read PNG, JPEG, GIF and WebP images up to 5 MB,
+sent as base64 only when the client asks, and return one file's uncommitted
+changes as `git diff HEAD` text capped at 512 KB. A file Git does not track yet
+is diffed against nothing. Images are not polled while an agent runs.
+
+```sh
+npm run test -w packages/agent-runtime -- src/runtime/workspace-files.test.ts
+npm run test -w packages/agent-bridge -- src/protocol.test.ts
+npm run test -w apps/connector -- src/daemon.test.ts
+npm run test -w apps/web -- lib/agents/workspaceFilePreview.test.ts 'app/api/agent-workspaces/[id]/file'
+E2E_PORT=4819 npm run test:e2e -w apps/web -- agent-runtime.spec.ts --grep 'shows durable turn activity'
+```
+
+The runtime test runs the real script against temporary repositories: modified,
+deleted, renamed, staged, untracked and binary files, a workspace below the
+repository root, a repository with no commits, an oversized diff, and paths that
+leave the workspace. The browser test mocks the server's file routes. Before
+release, open an image, a changed file and a deleted file on a real SSH host
+and a Windows target, and open a changed file against a connector without
+`workspace-files-v2`: the pane must offer the file's contents instead.
 
 ## Agent display transcript lifecycle
 

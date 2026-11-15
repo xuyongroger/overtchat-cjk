@@ -1,6 +1,16 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   Brain,
   ChevronRight,
@@ -10,6 +20,7 @@ import {
   FileText,
   Globe,
   Loader2,
+  PanelRightOpen,
   Search,
   Terminal,
   Users,
@@ -17,8 +28,11 @@ import {
 } from "lucide-react";
 import { ThinkingContent } from "@/components/chat/ThinkingContent";
 import {
+  agentThoughtPreview,
   agentToolStatus,
+  agentToolStepLabel,
   describeAgentActivity,
+  describeAgentLiveActivity,
   describeAgentTool,
   describeSubagentActivity,
   isSubagentRunning,
@@ -30,6 +44,9 @@ import {
 } from "@/lib/agents/presentation";
 import { motionClasses } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { AgentDiffLines } from "./AgentDiffLines";
+import { AgentDisclosureContext } from "./AgentTranscriptMotion";
+import { useAgentWorkspaceNavigation } from "./AgentWorkspaceNavigationContext";
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -108,6 +125,44 @@ export function AgentRunIndicator({
   );
 }
 
+/** The running turn's header. "Worked for …" takes its place when the turn ends. */
+export function AgentRunHeader({
+  startedAt,
+  className,
+}: {
+  startedAt: number | null;
+  className?: string;
+}) {
+  const elapsed = useElapsed(startedAt);
+  return (
+    <div
+      className={cn("flex items-center border-b border-border/60 pb-2 pt-1", className)}
+      data-testid="agent-run-header"
+    >
+      <span className="flex min-h-8 items-center px-1 text-sm leading-relaxed text-muted-foreground tabular-nums">
+        {elapsed ? `Working for ${elapsed}` : "Working"}
+      </span>
+    </div>
+  );
+}
+
+/** Ends a running turn whenever none of its tool rows is itself live. */
+export function AgentLiveRow({ providerLabel }: { providerLabel: string }) {
+  return (
+    <div
+      className="flex min-h-8 items-center gap-2 py-1 text-xs text-muted-foreground"
+      role="status"
+      aria-label={`${providerLabel}: working`}
+      data-testid="agent-run-activity"
+    >
+      <Brain className="size-3.5 shrink-0" />
+      <span className={cn("font-medium text-foreground", motionClasses.shimmer)}>
+        Thinking
+      </span>
+    </div>
+  );
+}
+
 export function AgentActivityGroup({
   entries,
   active,
@@ -120,6 +175,8 @@ export function AgentActivityGroup({
   const presentation = describeAgentActivity(entries, active);
   const hasError = presentation.status === "failed";
   const [open, setOpen] = useState(hasError);
+  const holdDisclosure = useContext(AgentDisclosureContext);
+  const [openDetailHeight, reportDetailHeight] = useOpenDetailHeight();
   const singleEntry = entries.length === 1 ? entries[0] : null;
   if (singleEntry?.type === "subagent") {
     return (
@@ -133,8 +190,10 @@ export function AgentActivityGroup({
     );
   }
 
-  const toolSummary = entries.every((entry) => entry.type === "tool");
-  const live = active && presentation.status === "running";
+  const toolSummary = entries.some((entry) => entry.type === "tool");
+  // The last group of a running turn shows the step it is on, not a count.
+  const liveActivity = active ? describeAgentLiveActivity(entries) : null;
+  const liveStep = liveActivity ? liveStepPresentation(liveActivity.step) : null;
   const hasDetailedSteps = entries.some(
     (entry) =>
       entry.type === "tool" ||
@@ -150,60 +209,119 @@ export function AgentActivityGroup({
     >
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={(event) => {
+          holdDisclosure(event.currentTarget);
+          setOpen((current) => !current);
+        }}
         aria-expanded={open}
         aria-label={
-          toolSummary
-            ? `${presentation.label}, ${presentation.status}`
-            : undefined
+          liveStep
+            ? undefined
+            : toolSummary
+              ? `${presentation.label}, ${presentation.status}`
+              : undefined
         }
-        className="group flex min-h-7 w-full items-center gap-2 rounded-md py-0.5 pr-1 text-left text-muted-foreground motion-colors hover:text-foreground"
+        className="group flex w-full flex-col rounded-md pr-1 text-left text-muted-foreground motion-colors hover:text-foreground"
+        data-agent-live-step={liveStep ? "true" : undefined}
       >
-        <DisclosureLeadIcon open={open}>
-          <ActivityIcon
-            entries={entries}
-            status={presentation.status}
-            toolSummary={toolSummary}
-          />
-        </DisclosureLeadIcon>
-        <span className="min-w-0 flex flex-1 items-baseline gap-2">
+        {liveActivity?.thought && !open && (
           <span
-            className={cn(
-              "shrink-0 font-normal motion-colors group-hover:text-foreground",
-              live && !open && motionClasses.shimmer,
-            )}
+            className="flex w-full items-start gap-2 py-0.5"
+            data-testid="agent-live-thought"
           >
-            {presentation.label}
-          </span>
-          {presentation.secondary && (
-            <span className="min-w-0 truncate font-mono text-[11px]">
-              {presentation.secondary}
+            <Brain className="mt-0.5 size-3.5 shrink-0" />
+            <span className="line-clamp-4 min-w-0 leading-relaxed">
+              {liveActivity.thought}
             </span>
-          )}
+          </span>
+        )}
+        <span className="flex min-h-7 w-full items-center gap-2 py-0.5">
+          <DisclosureLeadIcon open={open}>
+            {liveStep ? (
+              liveStep.icon
+            ) : (
+              <ActivityIcon
+                entries={entries}
+                status={presentation.status}
+                toolSummary={toolSummary}
+              />
+            )}
+          </DisclosureLeadIcon>
+          <span className="min-w-0 flex flex-1 items-baseline gap-2">
+            <span
+              className={cn(
+                "shrink-0 font-normal motion-colors group-hover:text-foreground",
+                liveStep && motionClasses.shimmer,
+              )}
+            >
+              {liveStep ? liveStep.label : presentation.label}
+            </span>
+            {liveStep?.summary ? (
+              <span className="min-w-0 truncate font-mono text-[11px]">
+                {liveStep.summary}
+              </span>
+            ) : !liveStep && presentation.secondary ? (
+              <span className="min-w-0 truncate font-mono text-[11px]">
+                {presentation.secondary}
+              </span>
+            ) : null}
+          </span>
         </span>
       </button>
 
       {open && (
+        // The list of steps is capped, and an open step adds its own height to
+        // the cap so its detail never scrolls inside a second scroller.
         <div
-          className={cn(
-            "relative mt-1 ml-2 max-h-[25rem] overflow-y-auto pl-5",
-            hasDetailedSteps && "border-l border-border/70",
-          )}
+          className="mt-1 overflow-y-auto"
+          style={{ maxHeight: `calc(25rem + ${openDetailHeight}px)` }}
           data-testid="agent-activity-details"
         >
-          {entries.map((entry, index) => (
-            <ActivityStep
-              key={entry.id}
-              entry={entry}
-              active={active}
-              last={index === entries.length - 1}
-              showDetailedStep={hasDetailedSteps || entries.length > 1}
-            />
-          ))}
+          <StepDetailContext.Provider value={reportDetailHeight}>
+            {/* The rail sits inside the scroller: step icons straddle it and
+                would be clipped at the scroller's own edge. */}
+            <div
+              className={cn(
+                "ml-2 pl-5",
+                hasDetailedSteps && "border-l border-border/70",
+              )}
+            >
+              {entries.map((entry, index) => (
+                <ActivityStep
+                  key={entry.id}
+                  entry={entry}
+                  active={active}
+                  last={index === entries.length - 1}
+                  showDetailedStep={hasDetailedSteps}
+                />
+              ))}
+            </div>
+          </StepDetailContext.Provider>
         </div>
       )}
     </div>
   );
+}
+
+/** The live group's one line: the step's own label, in the words its row uses. */
+function liveStepPresentation(step: AgentActivityEntry): {
+  icon: ReactNode;
+  label: string;
+  summary: string | null;
+} {
+  const iconClass = "size-3.5 shrink-0 text-muted-foreground";
+  if (step.type === "thinking") {
+    return { icon: <Brain className={iconClass} />, label: "Thinking", summary: null };
+  }
+  if (step.type === "subagent") {
+    return { icon: <Users className={iconClass} />, ...describeSubagentActivity(step.activity) };
+  }
+  const presentation = describeAgentTool(step.tool);
+  return {
+    icon: <ToolCategoryIcon category={presentation.category} className={iconClass} />,
+    label: agentToolStepLabel(presentation.category, agentToolStatus(step.tool, true)),
+    summary: presentation.summary,
+  };
 }
 
 function ActivityStep({
@@ -230,10 +348,7 @@ function ActivityStep({
         icon={<Brain className="size-3.5" />}
         last={last}
       >
-        <div className="space-y-2">
-          <div className="font-medium text-foreground">Thinking</div>
-          <ThinkingContent content={entry.content} />
-        </div>
+        <ThoughtActivityStep content={entry.content} live={active && last} />
       </TimelineStep>
     );
   }
@@ -283,6 +398,7 @@ function SubagentActivityStep({
         ? "stopped"
         : "completed";
   const [open, setOpen] = useState(status === "failed");
+  const holdDisclosure = useContext(AgentDisclosureContext);
   const { label, summary } = describeSubagentActivity(activity);
   const canOpen =
     Boolean(activity.prompt) ||
@@ -293,7 +409,11 @@ function SubagentActivityStep({
     <div data-testid="agent-subagent-activity">
       <button
         type="button"
-        onClick={() => canOpen && setOpen((current) => !current)}
+        onClick={(event) => {
+          if (!canOpen) return;
+          holdDisclosure(event.currentTarget);
+          setOpen((current) => !current);
+        }}
         disabled={!canOpen}
         aria-expanded={canOpen ? open : undefined}
         className={cn(
@@ -327,7 +447,7 @@ function SubagentActivityStep({
         )}
       </button>
       {open && (
-        <div className="mt-2 space-y-2">
+        <StepDetail>
           {activity.prompt && (
             <CodeSurface label="Prompt" value={activity.prompt} />
           )}
@@ -370,8 +490,105 @@ function SubagentActivityStep({
               </div>
             </div>
           )}
-        </div>
+        </StepDetail>
       )}
+    </div>
+  );
+}
+
+function ThoughtActivityStep({
+  content,
+  live,
+}: {
+  content: string;
+  live: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const holdDisclosure = useContext(AgentDisclosureContext);
+  const preview = agentThoughtPreview(content);
+
+  return (
+    <div data-testid="agent-thought-activity">
+      <button
+        type="button"
+        onClick={(event) => {
+          holdDisclosure(event.currentTarget);
+          setOpen((current) => !current);
+        }}
+        aria-expanded={open}
+        className="group flex min-h-6 w-full cursor-pointer items-start gap-2 rounded-md py-0.5 text-left text-muted-foreground motion-colors hover:text-foreground"
+      >
+        <span className="min-w-0 flex flex-1 items-baseline gap-2">
+          <span
+            className={cn(
+              "shrink-0 font-normal motion-colors group-hover:text-foreground",
+              live && motionClasses.shimmer,
+            )}
+          >
+            {live ? "Thinking" : "Thought"}
+          </span>
+          {!open && preview && (
+            <span className="min-w-0 truncate text-[11px] text-muted-foreground/70">
+              {preview}
+            </span>
+          )}
+        </span>
+        <ChevronRight
+          className={cn(
+            "mt-0.5 size-3 shrink-0 text-muted-foreground/60 motion-transform",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+      {open && (
+        <StepDetail>
+          <ThinkingContent content={content} />
+        </StepDetail>
+      )}
+    </div>
+  );
+}
+
+const StepDetailContext = createContext<
+  ((id: string, height: number) => void) | null
+>(null);
+
+/** The summed height of the step details that are open inside one group. */
+function useOpenDetailHeight() {
+  const [heights, setHeights] = useState<Record<string, number>>({});
+  const report = useCallback((id: string, height: number) => {
+    setHeights((current) => {
+      if ((current[id] ?? 0) === height) return current;
+      const next = { ...current };
+      if (height > 0) next[id] = height;
+      else delete next[id];
+      return next;
+    });
+  }, []);
+  const total = Object.values(heights).reduce((sum, height) => sum + height, 0);
+  return [total, report] as const;
+}
+
+/** The body an open step shows under its row. */
+function StepDetail({ children }: { children: ReactNode }) {
+  const id = useId();
+  const report = useContext(StepDetailContext);
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element || !report) return;
+    const measure = () => report(id, element.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      report(id, 0);
+    };
+  }, [id, report]);
+  return (
+    <div ref={ref} className="space-y-2 pt-2 pb-1.5" data-agent-step-detail>
+      {children}
     </div>
   );
 }
@@ -386,7 +603,7 @@ function TimelineStep({
   children: ReactNode;
 }) {
   return (
-    <div className={cn("relative min-w-0", last ? "pb-1" : "pb-4")}>
+    <div className={cn("relative min-w-0", last ? "pb-1" : "pb-1.5")}>
       <span className="absolute top-0.5 -left-[29px] flex size-4 items-center justify-center bg-background text-muted-foreground">
         {icon}
       </span>
@@ -408,13 +625,29 @@ function ToolActivityStep({
   const status = agentToolStatus(tool, active);
   const detail = toolDetail(tool, presentation.category);
   const [open, setOpen] = useState(status === "failed");
+  const holdDisclosure = useContext(AgentDisclosureContext);
   const canOpen = detail !== null;
+  const navigation = useAgentWorkspaceNavigation();
+  const filePath =
+    navigation &&
+    presentation.summary &&
+    (presentation.category === "read" ||
+      presentation.category === "edit" ||
+      presentation.category === "write") &&
+    // Agents also read their own resources by URL; those are not files.
+    !presentation.summary.includes("://")
+      ? presentation.summary
+      : null;
 
   return (
-    <div data-testid="agent-tool-activity">
+    <div className="group/step relative" data-testid="agent-tool-activity">
       <button
         type="button"
-        onClick={() => canOpen && setOpen((current) => !current)}
+        onClick={(event) => {
+          if (!canOpen) return;
+          holdDisclosure(event.currentTarget);
+          setOpen((current) => !current);
+        }}
         disabled={!canOpen}
         aria-expanded={canOpen ? open : undefined}
         aria-label={`${presentation.label}${presentation.summary ? `: ${presentation.summary}` : ""}, ${status}`}
@@ -431,9 +664,14 @@ function ToolActivityStep({
             />
           </DisclosureLeadIcon>
         )}
-        <span className="min-w-0 flex flex-1 items-baseline gap-2">
+        <span
+          className={cn(
+            "min-w-0 flex flex-1 items-baseline gap-2",
+            filePath && "pr-6",
+          )}
+        >
           <span className="shrink-0 font-normal motion-colors group-hover:text-foreground">
-            {toolStepLabel(presentation.category, status)}
+            {agentToolStepLabel(presentation.category, status)}
           </span>
           {presentation.summary && (
             <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
@@ -451,32 +689,23 @@ function ToolActivityStep({
           />
         )}
       </button>
-      {open && detail}
+      {filePath && navigation && (
+        <button
+          type="button"
+          onClick={() => navigation.openFile({ path: filePath })}
+          aria-label={`Open ${filePath}`}
+          title="Open file"
+          className={cn(
+            "absolute top-0.5 flex size-5 items-center justify-center rounded text-muted-foreground opacity-0 motion-colors hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/step:opacity-100 [@media(hover:none)]:opacity-100",
+            status === "completed" ? "right-5" : "right-10",
+          )}
+        >
+          <PanelRightOpen className="size-3.5" />
+        </button>
+      )}
+      {open && detail && <StepDetail>{detail}</StepDetail>}
     </div>
   );
-}
-
-function toolStepLabel(
-  category: AgentToolCategory,
-  status: AgentToolStatus,
-): string {
-  const running = status === "running";
-  switch (category) {
-    case "shell":
-      return running ? "Running" : "Terminal";
-    case "read":
-      return running ? "Reading" : "Read";
-    case "edit":
-      return running ? "Editing" : "Edited";
-    case "write":
-      return running ? "Writing" : "Wrote";
-    case "search":
-      return running ? "Searching" : "Searched";
-    case "fetch":
-      return running ? "Fetching" : "Fetched";
-    case "other":
-      return running ? "Running tool" : "Tool";
-  }
 }
 
 function toolDetail(
@@ -506,9 +735,9 @@ function toolDetail(
       return null;
     }
     return (
-      <div className="mt-2 overflow-hidden rounded-md border bg-muted/15">
+      <div className="overflow-hidden rounded-md border bg-muted/15">
         {command && (
-          <pre className="overflow-x-auto px-3 py-2.5 font-mono text-[11px] leading-5 text-foreground">
+          <pre className="max-h-72 overflow-y-auto px-3 py-2.5 font-mono text-[11px] leading-5 whitespace-pre-wrap wrap-anywhere text-foreground">
             <span className="select-none text-muted-foreground">$ </span>
             {command}
           </pre>
@@ -554,14 +783,14 @@ function toolDetail(
   if (!patch && !content && !input && !output) return null;
 
   return (
-    <div className="mt-2 space-y-2">
+    <>
       {patch && <DiffSurface value={patch} />}
       {content && <CodeSurface label="Content" value={content} />}
       {!patch && !content && input && (
         <CodeSurface label="Input" value={input} />
       )}
       {output && <CodeSurface label="Output" value={output} />}
-    </div>
+    </>
   );
 }
 
@@ -585,23 +814,7 @@ function DiffSurface({ value }: { value: string }) {
         Changes
       </div>
       <pre className="max-h-80 overflow-auto bg-background/50 py-2.5 font-mono text-[11px] leading-5">
-        {value.split("\n").map((line, index) => (
-          <span
-            key={index}
-            className={cn(
-              "block min-w-max px-3 whitespace-pre",
-              line.startsWith("+") &&
-                !line.startsWith("+++") &&
-                "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-              line.startsWith("-") &&
-                !line.startsWith("---") &&
-                "bg-red-500/10 text-red-700 dark:text-red-300",
-              line.startsWith("@@") && "text-muted-foreground",
-            )}
-          >
-            {line || " "}
-          </span>
-        ))}
+        <AgentDiffLines value={value} />
       </pre>
     </div>
   );

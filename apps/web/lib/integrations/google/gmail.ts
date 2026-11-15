@@ -1,14 +1,18 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { parseHTML } from "linkedom";
 import type {
   GmailAttachment,
   GmailAttachmentOutput,
   GmailDraftOutput,
+  GmailEmailContent,
+  GmailEmailOutput,
   GmailLabel,
   GmailLabelsOutput,
   GmailMessageSummary,
   GmailModifyLabelsOutput,
   GmailSearchOutput,
+  GmailSentOutput,
   GmailThreadMessage,
   GmailThreadOutput,
 } from "@overtchat/shared";
@@ -122,15 +126,17 @@ export async function searchGmail(
     })}`,
     { signal },
   );
-  const messages = await Promise.all(
-    (listed.messages ?? []).map(({ id }) =>
-      gmailRequest<GmailApiMessage>(
+  // One at a time: Gmail refuses a mailbox that is asked for many at once.
+  const messages: GmailApiMessage[] = [];
+  for (const { id } of listed.messages ?? []) {
+    messages.push(
+      await gmailRequest<GmailApiMessage>(
         userId,
         `/messages/${encodeURIComponent(id)}?${metadataQuery(SUMMARY_HEADERS)}`,
         { signal },
       ),
-    ),
-  );
+    );
+  }
   return {
     account: mailbox(userId),
     messages: messages.map(
@@ -531,16 +537,6 @@ export async function modifyGmailLabels(
   };
 }
 
-export interface GmailDraftInput {
-  to: string[];
-  cc: string[];
-  bcc: string[];
-  subject?: string;
-  body: string;
-  /** Makes the draft a reply in that message's thread. */
-  replyToMessageId?: string;
-}
-
 /** RFC 2047: header text outside ASCII travels as an encoded word. */
 function encodeHeaderText(value: string): string {
   return /^[\x20-\x7e]*$/.test(value)
@@ -583,12 +579,24 @@ export function buildDraftMessage(input: {
   return `${headers.join("\r\n")}\r\n\r\n${body}`;
 }
 
-/** Saves a draft in the user's mailbox. It is never sent from here. */
-export async function createGmailDraft(
+/** An email as Gmail takes it, with the fields a reply inherits filled in. */
+interface PreparedEmail {
+  raw: string;
+  /** The thread a reply joins. */
+  threadId: string | undefined;
+  to: string[];
+  subject: string;
+}
+
+/**
+ * Resolves an email against the mailbox: a reply takes its thread, and by
+ * default its recipient and subject, from the message it answers.
+ */
+async function prepareGmailEmail(
   userId: string,
-  input: GmailDraftInput,
+  input: GmailEmailContent,
   signal?: AbortSignal,
-): Promise<GmailDraftOutput> {
+): Promise<PreparedEmail> {
   let to = input.to;
   let subject = input.subject?.trim() ?? "";
   let threadId: string | undefined;
@@ -628,10 +636,10 @@ export async function createGmailDraft(
     }
   }
   if (to.length === 0) {
-    throw new IntegrationError("A draft needs at least one recipient.", 400);
+    throw new IntegrationError("An email needs at least one recipient.", 400);
   }
   if (!subject) {
-    throw new IntegrationError("A new draft needs a subject.", 400);
+    throw new IntegrationError("A new email needs a subject.", 400);
   }
 
   const raw = Buffer.from(
@@ -646,20 +654,98 @@ export async function createGmailDraft(
     }),
     "utf8",
   ).toString("base64url");
+  return { raw, threadId, to, subject };
+}
+
+/**
+ * Checks an email a model wrote and names it, for the card that shows it.
+ * Nothing is saved in Gmail and nothing is sent.
+ */
+export async function composeGmailEmail(
+  userId: string,
+  input: GmailEmailContent,
+  signal?: AbortSignal,
+): Promise<GmailEmailOutput> {
+  const email = await prepareGmailEmail(userId, input, signal);
+  return {
+    emailId: randomUUID(),
+    threadId: email.threadId ?? null,
+    account: mailbox(userId),
+    to: email.to.join(", "),
+    subject: email.subject,
+    status: "not_sent",
+  };
+}
+
+/** Saves a draft in the user's mailbox. It is never sent from here. */
+export async function createGmailDraft(
+  userId: string,
+  input: GmailEmailContent,
+  signal?: AbortSignal,
+): Promise<GmailDraftOutput> {
+  const email = await prepareGmailEmail(userId, input, signal);
   const draft = await gmailRequest<{
     id: string;
     message?: { threadId?: string };
   }>(userId, "/drafts", {
-    body: { message: { raw, ...(threadId ? { threadId } : {}) } },
+    body: {
+      message: {
+        raw: email.raw,
+        ...(email.threadId ? { threadId: email.threadId } : {}),
+      },
+    },
     signal,
   });
 
   return {
     draftId: draft.id,
-    threadId: draft.message?.threadId ?? threadId ?? null,
+    threadId: draft.message?.threadId ?? email.threadId ?? null,
     account: mailbox(userId),
-    to: to.join(", "),
-    subject,
+    to: email.to.join(", "),
+    subject: email.subject,
+  };
+}
+
+/**
+ * Sends an email as it is given. The user's own Send leads here, and so does
+ * gmail_send, the tool only a user who allowed it is given.
+ */
+export async function sendGmailEmail(
+  userId: string,
+  input: GmailEmailContent,
+  signal?: AbortSignal,
+): Promise<{ threadId: string | null; to: string; subject: string }> {
+  const email = await prepareGmailEmail(userId, input, signal);
+  const message = await gmailRequest<{ threadId?: string }>(
+    userId,
+    "/messages/send",
+    {
+      body: {
+        raw: email.raw,
+        ...(email.threadId ? { threadId: email.threadId } : {}),
+      },
+      signal,
+    },
+  );
+  return {
+    threadId: message.threadId ?? email.threadId ?? null,
+    to: email.to.join(", "),
+    subject: email.subject,
+  };
+}
+
+/** Sends an email at a model's call, and reports what went out. */
+export async function sendGmailEmailForModel(
+  userId: string,
+  input: GmailEmailContent,
+  signal?: AbortSignal,
+): Promise<GmailSentOutput> {
+  const sent = await sendGmailEmail(userId, input, signal);
+  return {
+    ...sent,
+    account: mailbox(userId),
+    status: "sent",
+    sentAt: new Date().toISOString(),
   };
 }
 

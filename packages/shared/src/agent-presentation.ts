@@ -1,7 +1,9 @@
 import {
   agentForkMessageId,
+  agentTurnChangesOf,
   type AgentRewindMode,
   type AgentRuntimeCapabilities,
+  type AgentTurnChanges,
 } from "@overtchat/agent-bridge";
 type UnknownRecord = Record<string, unknown>;
 
@@ -160,6 +162,12 @@ export type AgentTranscriptItem = {
       key: string;
       durationMs: number | null;
       expanded: boolean;
+    }
+  | {
+      /** What the turn above changed in the workspace's Git working tree. */
+      type: "turn_changes";
+      key: string;
+      changes: AgentTurnChanges;
     });
 
 /** Fold settled work for display only; the canonical transcript stays intact. */
@@ -369,7 +377,9 @@ export function agentResponseActions(
         if (!sameResponse) break;
         texts.unshift(item.text);
       }
-      actions.set(answer.key, {
+      // The actions close the turn, so they sit under what it changed.
+      const changes = turn.slice(answerIndex + 1).find((item) => item.type === "turn_changes");
+      actions.set((changes ?? answer).key, {
         text: texts.join("\n\n"),
         messageId: answer.actionable ? answer.messageId : null,
       });
@@ -431,7 +441,7 @@ export function agentActivitySequencePosition(
   return "single";
 }
 
-function isGroupableToolActivity(
+function isGroupableActivity(
   item: AgentTranscriptItem,
 ): item is Extract<AgentTranscriptItem, { type: "activity" }> {
   return (
@@ -439,15 +449,16 @@ function isGroupableToolActivity(
     item.entries.length > 0 &&
     item.entries.every(
       (entry) =>
-        entry.type === "tool" && normalizedToolName(entry.tool.name) !== "speak",
+        entry.type === "thinking" ||
+        (entry.type === "tool" && normalizedToolName(entry.tool.name) !== "speak"),
     )
   );
 }
 
 /**
- * Consecutive tool calls share one expandable summary in the transcript. The
- * raw entries remain intact inside that summary, and any non-tool item seals
- * the current run.
+ * Consecutive tool calls share one expandable summary in the transcript, and
+ * the reasoning between them stays inside it as steps. The raw entries remain
+ * intact inside that summary, and any other item seals the current run.
  */
 export function groupAgentToolActivity(
   items: readonly AgentTranscriptItem[],
@@ -471,7 +482,7 @@ export function groupAgentToolActivity(
   };
 
   for (const item of items) {
-    if (isGroupableToolActivity(item)) {
+    if (isGroupableActivity(item)) {
       if (pending.length && pending[0].turnId !== item.turnId) flush();
       pending.push(item);
       continue;
@@ -1137,6 +1148,15 @@ export function projectAgentTranscript(
       return;
     }
 
+    const turnChanges = agentTurnChangesOf(message);
+    if (turnChanges) {
+      items.push({
+        type: "turn_changes",
+        key: `turn-changes:${turnChanges.head}`,
+        changes: turnChanges,
+      });
+      return;
+    }
     if (role === "custom" && record.display === false) return;
     if (role === "custom") {
       const notification = presentOmpSystemNotice(textOfContent(record.content));
@@ -1175,6 +1195,14 @@ export function projectAgentTranscript(
       if (["aborted", "error", "cancelled", "interrupted"].includes(String(record?.stopReason))) {
         item.interrupted = true;
       }
+    }
+  });
+  // A turn's changes are recorded after its footer; they read above it.
+  items.forEach((item, index) => {
+    const previous = items[index - 1];
+    if (item.type === "turn_changes" && previous?.type === "turn_footer") {
+      items[index - 1] = { ...item, turnId: previous.turnId };
+      items[index] = previous;
     }
   });
   return groupAgentToolActivity(items);
@@ -1303,6 +1331,30 @@ export function agentToolStatus(
   return active ? "running" : "stopped";
 }
 
+/** A step's verb: what it is doing while it runs, what it was once it is done. */
+export function agentToolStepLabel(
+  category: AgentToolCategory,
+  status: AgentToolStatus,
+): string {
+  const running = status === "running";
+  switch (category) {
+    case "shell":
+      return running ? "Running" : "Terminal";
+    case "read":
+      return running ? "Reading" : "Read";
+    case "edit":
+      return running ? "Editing" : "Edited";
+    case "write":
+      return running ? "Writing" : "Wrote";
+    case "search":
+      return running ? "Searching" : "Searched";
+    case "fetch":
+      return running ? "Fetching" : "Fetched";
+    case "other":
+      return running ? "Running tool" : "Tool";
+  }
+}
+
 function plural(count: number, one: string, many = `${one}s`): string {
   return `${count.toLocaleString()} ${count === 1 ? one : many}`;
 }
@@ -1393,13 +1445,16 @@ export function describeAgentActivity(
   }
 
   const statuses = tools.map((tool) => agentToolStatus(tool, active));
-  const status: AgentToolStatus = statuses.includes("running")
-    ? "running"
-    : statuses.includes("failed")
-      ? "failed"
-      : statuses.includes("stopped")
-        ? "stopped"
-        : "completed";
+  // Reasoning after the last tool call keeps a live group running.
+  const status: AgentToolStatus =
+    statuses.includes("running") ||
+    (active && entries.at(-1)?.type === "thinking")
+      ? "running"
+      : statuses.includes("failed")
+        ? "failed"
+        : statuses.includes("stopped")
+          ? "stopped"
+          : "completed";
 
   const editedFiles = new Set<string>();
   const readFiles = new Set<string>();
@@ -1452,6 +1507,96 @@ export function describeAgentActivity(
     secondary: null,
     status,
   };
+}
+
+/** One line of a reasoning block, for the step that stands in for it. */
+export function agentThoughtPreview(content: string): string {
+  const line = content
+    .split("\n")
+    .map((candidate) =>
+      candidate
+        .replace(/^\s*(?:#{1,6}|>|[-*+]|\d+[.)])\s+/u, "")
+        .replace(/[*_`]+/gu, "")
+        .replace(/\s+/gu, " ")
+        .trim(),
+    )
+    .find(Boolean);
+  if (!line) return "";
+  return line.length > 160 ? `${line.slice(0, 159).trimEnd()}…` : line;
+}
+
+/** The opening of a reasoning block: its bold heading, else its first sentence. */
+export function agentLiveThoughtLine(content: string): string {
+  const source = content.slice(0, 8192).trim();
+  const firstLine = source.split("\n", 1)[0]?.trim() ?? "";
+  const heading = /^\*\*([^*]+)\*\*$/u.exec(firstLine)?.[1];
+  const text = (heading ?? source)
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:#{1,6}|>|[-*+]|\d+[.)])\s+/u, ""))
+    .join(" ")
+    // A link keeps its text.
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/gu, "$1")
+    .replace(/[*`~]+/gu, "")
+    // Underscores mark emphasis only at a word's edge; inside a name they stay.
+    .replace(/(^|\s)_+|_+(?=\s|$)/gu, "$1")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (heading !== undefined) return text;
+  const end = /[.?!]["'”’)]?(?=\s)/u.exec(text);
+  return end ? text.slice(0, end.index + end[0].length) : text;
+}
+
+export type AgentLiveActivity = {
+  /** The step the turn is on: the newest one still running, else the newest. */
+  step: AgentActivityEntry;
+  /** The newest thought's opening line. */
+  thought: string | null;
+};
+
+function activityEntryStatus(entry: AgentActivityEntry): AgentToolStatus | null {
+  if (entry.type === "tool") return agentToolStatus(entry.tool, true);
+  if (entry.type !== "subagent") return null;
+  if (isSubagentRunning(entry.activity.status)) return "running";
+  return entry.activity.status === "failed" ? "failed" : "completed";
+}
+
+/**
+ * What the last group of a running turn is doing right now. Null when the
+ * group has nothing to show, or when its newest step failed with nothing
+ * else running: a failure is not progress.
+ */
+export function describeAgentLiveActivity(
+  entries: AgentActivityEntry[],
+): AgentLiveActivity | null {
+  let latest: AgentActivityEntry | undefined;
+  let running: AgentActivityEntry | undefined;
+  let thought: string | undefined;
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]!;
+    if (entry.type === "thinking") {
+      if (!entry.content.trim()) continue;
+      thought ??= entry.content;
+    } else if (!running && activityEntryStatus(entry) === "running") {
+      running = entry;
+    }
+    latest ??= entry;
+  }
+  if (!latest) return null;
+  if (!running && activityEntryStatus(latest) === "failed") return null;
+  return {
+    step: running ?? latest,
+    thought: thought === undefined ? null : agentLiveThoughtLine(thought) || null,
+  };
+}
+
+/** Whether the last group of a running turn is itself the turn's live row. */
+export function agentActivityIsLive(entries: AgentActivityEntry[]): boolean {
+  const [only] = entries;
+  // A lone subagent launch renders as its own row, live only while it runs.
+  if (entries.length === 1 && only?.type === "subagent") {
+    return isSubagentRunning(only.activity.status);
+  }
+  return describeAgentLiveActivity(entries) !== null;
 }
 
 export function formatAgentToolDetail(tool: AgentToolActivity): string {

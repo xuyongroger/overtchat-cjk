@@ -1031,6 +1031,27 @@ export const gmailSentDrafts = sqliteTable(
 );
 
 /**
+ * What the user did with an email a model wrote in a chat. The chat's saved
+ * tool result never changes, so this is what lets its card show that the
+ * email is in Gmail's drafts or went out.
+ */
+export const gmailEmails = sqliteTable(
+  "gmail_emails",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    emailId: text("email_id").notNull(),
+    /** The draft in Gmail, once the user saved the email there. */
+    draftId: text("draft_id"),
+    /** The sent message's thread, for a link to it. */
+    threadId: text("thread_id"),
+    sentAt: integer("sent_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.emailId] })],
+);
+
+/**
  * One user's sign-in to a provider. It covers the integrations whose scopes it
  * was granted. Tokens never leave the server.
  */
@@ -1055,6 +1076,12 @@ export const integrationAccounts = sqliteTable(
     // The integrations whose tools are offered in every chat. Any other
     // integration reaches a chat only once the user turns it on there.
     alwaysOn: text("always_on", { mode: "json" })
+      .$type<IntegrationId[]>()
+      .default(sql`'[]'`)
+      .notNull(),
+    // The integrations whose tools may send as the user without asking them
+    // first. Only Gmail sends; it is off unless the user turns it on.
+    sendWithoutAsking: text("send_without_asking", { mode: "json" })
       .$type<IntegrationId[]>()
       .default(sql`'[]'`)
       .notNull(),

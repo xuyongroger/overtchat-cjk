@@ -722,6 +722,37 @@ servers left behind by older versions without records are not automatically
 reaped. Stopping a session aborts its work; other sessions sharing the same
 OpenCode server remain available.
 
+### Turn change snapshots
+
+After each agent turn in a Git workspace, the Host Connector records which
+files the turn changed and how many lines it added and removed. It does this by
+snapshotting the working tree before the first prompt and after every turn, and
+comparing consecutive snapshots, so changes made by commands and formatters
+count like edits, and work that was already uncommitted before the turn does
+not.
+
+A snapshot is a commit under `refs/overtchat/turns/<session>/<n>` in the
+workspace's repository (the parent repository, for a worktree). It is built in
+a scratch index: the working tree, the index, branches, `HEAD`, and stashes are
+never touched, and nothing is pushed. Snapshots do appear in views that list
+every ref, such as `git log --all`. Files matched by `.gitignore` are left out;
+other untracked files are stored in the repository's object database, so keep
+large generated files ignored.
+
+Snapshots run with Git and Node.js on the machine that holds the workspace,
+like workspace Git status. A folder that is not a repository, a sparse
+checkout, or a workspace directory its repository ignores is skipped and shows
+no changes. A snapshot that takes longer than 30 seconds is abandoned and the
+session stops snapshotting until it is reopened; the first snapshot of a
+session holds its first prompt for at most 5 seconds.
+
+Removing a workspace or connection from OvertChat deletes its sessions'
+snapshots. To remove every snapshot from a repository by hand:
+
+```sh
+git for-each-ref --format='delete %(refname)' refs/overtchat | git update-ref --stdin
+```
+
 ### Workspace terminals
 
 The web and desktop agent workspace header includes a resizable terminal panel.
@@ -898,12 +929,26 @@ web, desktop and mobile:
   15 MB. Images and scanned PDFs cannot be read.
 - Sort mail by adding or removing labels: mark as read, archive, star, apply
   the person's own labels, move to the trash, or report spam.
-- Save a draft, including a reply in its thread.
+- Write an email, including a reply in its thread.
 
-A model cannot send mail. A draft it saves shows in the chat with its text and
-a **Send** button, and goes out only when the person presses that or sends it
-from Gmail. Nothing is deleted for good either: mail moved to the trash stays
-there for 30 days.
+A model cannot send mail. An email it writes shows in the chat with its text
+and a **Send** button, and goes out only when the person presses that. Until
+then it is only in the chat, and nothing is added to Gmail: asking for changes
+gives a new version and marks the earlier one as replaced. **Save to Gmail**
+puts the email in Gmail's drafts to edit there first, and **Send** then sends
+that draft as it stands. The card works the same on web, desktop and mobile.
+A voice conversation, and a mobile app from before the card had its buttons,
+save a draft in Gmail instead, as before. Nothing is deleted for good either:
+mail moved to the trash stays there for 30 days.
+
+A person can let models send for them: **Sending** beside Gmail in Settings →
+Tools is **Ask first** by default, and **Without asking** gives a model a tool
+that sends an email at once, on web, desktop, mobile and by voice. A model is
+told to use it only when the person asked for that email to be sent, but
+nothing checks that it does: mail a model reads is written by other people and
+can try to talk it into sending. Each person chooses for their own mailbox,
+and the choice is switched off when a different Google account signs in. An
+email a model sent shows in the chat as **Sent**, with its text.
 
 Where Google Calendar is on, models can work with that person's calendars:
 

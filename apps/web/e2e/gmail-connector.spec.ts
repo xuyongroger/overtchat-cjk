@@ -171,7 +171,7 @@ test("an administrator sets up Google access, then each person connects their ow
       "Sign in once to connect Gmail and Google Calendar.",
     );
     await expect(connectors(page).getByRole("listitem", { name: "Gmail" })).toContainText(
-      "Let models search, read and organize your mail, and write drafts for you to send.",
+      "Let models search, read and organize your mail, and write emails for you to send.",
     );
 
     // The sign-in asks Google for a lasting grant on the loopback redirect.
@@ -425,7 +425,9 @@ test("one sign-in covers what the person chooses, and is widened by signing in a
   ).toBe(ALL_SCOPES.join(" "));
   grantedScopes = ALL_SCOPES;
   await finish(second);
-  await expect(connectors(page).getByRole("radiogroup")).toHaveCount(2);
+  await expect(
+    connectors(page).getByRole("radiogroup", { name: /tool access/ }),
+  ).toHaveCount(2);
 
   // Each connector has its own tool access choice.
   const calendarAlways = calendarRow

@@ -5,9 +5,13 @@ import {
   agentRewindOptions,
   agentActiveTurnStart,
   restoreAgentComposer,
+  agentActivityIsLive,
   agentActivitySequencePosition,
+  agentLiveThoughtLine,
   agentToolStatus,
+  agentThoughtPreview,
   describeAgentActivity,
+  describeAgentLiveActivity,
   describeAgentTool,
   describeSubagentActivity,
   formatAgentToolDetail,
@@ -117,7 +121,7 @@ describe("projectAgentTranscript", () => {
     });
   });
 
-  it("keeps reasoning distinct while grouping consecutive tool activity", () => {
+  it("groups consecutive tool activity together with the reasoning between it", () => {
     const projected = projectAgentTranscript([
       { role: "user", content: "Remove the old image", timestamp: 1 },
       assistant(
@@ -148,18 +152,13 @@ describe("projectAgentTranscript", () => {
     expect(projected.map((item) => item.type)).toEqual([
       "message",
       "activity",
-      "activity",
       "assistant_text",
     ]);
-    expect(projected.slice(1, 3)).toEqual([
+    expect(projected.slice(1, 2)).toEqual([
       expect.objectContaining({
         type: "activity",
-        entries: [expect.objectContaining({ type: "thinking" })],
-      }),
-      expect.objectContaining({
-        type: "activity",
-        key: "activity:tool:inspect",
         entries: [
+          expect.objectContaining({ type: "thinking" }),
           expect.objectContaining({
             type: "tool",
             tool: expect.objectContaining({
@@ -203,7 +202,7 @@ describe("projectAgentTranscript", () => {
     ]);
   });
 
-  it("uses reasoning and subagent activity as tool-group boundaries", () => {
+  it("keeps reasoning in a tool group and uses subagent activity as its boundary", () => {
     const projected = projectAgentTranscript([
       assistant([call("first", "bash", { command: "one" })], 1),
       result("first", "bash", "one"),
@@ -231,7 +230,7 @@ describe("projectAgentTranscript", () => {
           ? item.entries.map((entry) => entry.type)
           : item.type,
       ),
-    ).toEqual([["tool"], ["thinking"], ["subagent"], ["tool"]]);
+    ).toEqual([["tool", "thinking"], ["subagent"], ["tool"]]);
   });
 
   it("keeps commentary inline and puts timing on the turn footer", () => {
@@ -544,7 +543,7 @@ describe("agent activity sequences", () => {
       projected.map((item, index) =>
         agentActivitySequencePosition(projected, index),
       ),
-    ).toEqual(["first", "last", null, "single"]);
+    ).toEqual(["single", null, "single"]);
   });
 });
 
@@ -673,6 +672,102 @@ describe("agent activity presentation", () => {
       secondary: null,
       status: "running",
     });
+  });
+
+  it("leaves reasoning out of the count and keeps the group live while it continues", () => {
+    const shell = tool("shell", "bash", { command: "npm test" });
+    const entries = [
+      { type: "thinking" as const, id: "before", content: "Run the tests." },
+      { type: "tool" as const, id: "shell", tool: shell },
+      { type: "thinking" as const, id: "after", content: "Now read the log." },
+    ];
+
+    expect(describeAgentActivity(entries, true)).toEqual({
+      label: "Ran 1 command",
+      secondary: null,
+      status: "running",
+    });
+    expect(describeAgentActivity(entries, false)).toEqual({
+      label: "Ran 1 command",
+      secondary: null,
+      status: "completed",
+    });
+  });
+
+  it("previews reasoning as its first line without Markdown markers", () => {
+    expect(
+      agentThoughtPreview("\n\n**Checking   the migration**\n\nThen the rest."),
+    ).toBe("Checking the migration");
+    expect(agentThoughtPreview("- `npm test` first")).toBe("npm test first");
+    expect(agentThoughtPreview("x".repeat(200))).toHaveLength(160);
+    expect(agentThoughtPreview("  \n ")).toBe("");
+  });
+
+  it("opens a live thought with its heading, else its first sentence", () => {
+    expect(
+      agentLiveThoughtLine("**Checking the migration**\n\nThe table has two indexes. Next."),
+    ).toBe("Checking the migration");
+    expect(
+      agentLiveThoughtLine("The `burst_test` fails: [the limiter](src/limiter.ts) lets 12 through. I will clamp it."),
+    ).toBe("The burst_test fails: the limiter lets 12 through.");
+    expect(agentLiveThoughtLine("- _first_ look at\nthe refill path")).toBe(
+      "first look at the refill path",
+    );
+    expect(agentLiveThoughtLine(" \n ")).toBe("");
+  });
+
+  it("names the step a live group is on, under its newest thought", () => {
+    const done = { type: "tool" as const, id: "done", tool: tool("done", "read", { path: "a.ts" }) };
+    const running = {
+      type: "tool" as const,
+      id: "run",
+      tool: { ...tool("run", "bash", { command: "npm test" }), hasResult: false },
+    };
+    const thought = (id: string, content: string) => ({ type: "thinking" as const, id, content });
+
+    // A running step wins over anything newer; the newest thought leads.
+    expect(
+      describeAgentLiveActivity([
+        thought("t1", "Old idea."),
+        done,
+        running,
+        thought("t2", "**Clamp the tokens**\n\nDetails."),
+      ]),
+    ).toEqual({ step: running, thought: "Clamp the tokens" });
+    expect(describeAgentLiveActivity([running, done])).toEqual({ step: running, thought: null });
+    // With nothing running the newest step stays, so the row does not blink between steps.
+    expect(describeAgentLiveActivity([done])).toEqual({ step: done, thought: null });
+    const latestThought = thought("t3", "Reading the result.");
+    expect(describeAgentLiveActivity([done, latestThought])).toEqual({
+      step: latestThought,
+      thought: "Reading the result.",
+    });
+    // Empty reasoning is not a step.
+    expect(describeAgentLiveActivity([thought("empty", "  ")])).toBeNull();
+    expect(describeAgentLiveActivity([done, thought("empty", "")])).toEqual({
+      step: done,
+      thought: null,
+    });
+  });
+
+  it("leaves a group whose newest step failed to the turn's own live row", () => {
+    const done = { type: "tool" as const, id: "done", tool: tool("done", "read", { path: "a.ts" }) };
+    const failed = {
+      type: "tool" as const,
+      id: "bad",
+      tool: { ...tool("bad", "bash", { command: "false" }), isError: true },
+    };
+    const running = {
+      type: "tool" as const,
+      id: "run",
+      tool: { ...tool("run", "bash", { command: "npm test" }), hasResult: false },
+    };
+    expect(describeAgentLiveActivity([done, failed])).toBeNull();
+    expect(agentActivityIsLive([done, failed])).toBe(false);
+    // A failure with something still running, or followed by a new step, is live again.
+    expect(describeAgentLiveActivity([failed, running])?.step).toBe(running);
+    expect(describeAgentLiveActivity([failed, done])?.step).toBe(done);
+    expect(agentActivityIsLive([failed, done])).toBe(true);
   });
 
   it("counts unique read and edited paths like the collapsed overview", () => {

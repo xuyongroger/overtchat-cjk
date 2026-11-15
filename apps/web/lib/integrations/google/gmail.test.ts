@@ -45,6 +45,9 @@ interface Recorded {
   authorization?: string;
   body?: {
     message?: { raw?: string; threadId?: string };
+    /** A message sent as it is, without a draft. */
+    raw?: string;
+    threadId?: string;
     addLabelIds?: string[];
     removeLabelIds?: string[];
   };
@@ -129,6 +132,30 @@ describe("search", () => {
         expect.objectContaining({ id: "m2", unread: false }),
       ],
     });
+  });
+
+  it("asks for one message at a time", async () => {
+    let open = 0;
+    let mostOpen = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      open += 1;
+      mostOpen = Math.max(mostOpen, open);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      open -= 1;
+      const { pathname } = new URL(String(input));
+      return new Response(
+        JSON.stringify(
+          pathname.endsWith("/messages")
+            ? { messages: [{ id: "m1" }, { id: "m2" }, { id: "m3" }] }
+            : { id: pathname.split("/").pop(), threadId: "t1" },
+        ),
+      );
+    });
+
+    const result = await gmail.searchGmail("ada", { query: "in:inbox", limit: 5 });
+
+    expect(result.messages.map((message) => message.id)).toEqual(["m1", "m2", "m3"]);
+    expect(mostOpen).toBe(1);
   });
 
   it("returns nothing when no mail matches", async () => {
@@ -591,6 +618,99 @@ describe("drafts", () => {
     expect(draft).toMatchObject({ to: "grace@example.test", threadId: "t1" });
   });
 
+  const original = {
+    body: {
+      id: "m1",
+      threadId: "t1",
+      payload: {
+        headers: headers({
+          From: "Grace Hopper <grace@example.test>",
+          Subject: "Quarterly numbers",
+          "Message-ID": "<abc@mail.example.test>",
+        }),
+      },
+    },
+  };
+
+  it("composes an email without saving or sending anything", async () => {
+    const requests = google(() => original);
+
+    const email = await gmail.composeGmailEmail("ada", {
+      to: [],
+      cc: [],
+      bcc: [],
+      body: "Thanks, looks right.",
+      replyToMessageId: "m1",
+    });
+
+    // Only the message it answers is read, for what a reply inherits.
+    expect(requests.map((r) => r.method)).toEqual(["GET"]);
+    expect(email).toEqual({
+      emailId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      threadId: "t1",
+      account: "ada@example.test",
+      to: "grace@example.test",
+      subject: "Re: Quarterly numbers",
+      status: "not_sent",
+    });
+    await expect(
+      gmail.composeGmailEmail("ada", { to: [], cc: [], bcc: [], body: "Hi" }),
+    ).rejects.toThrow(/recipient/);
+  });
+
+  it("sends an email as written, in the thread it answers", async () => {
+    const requests = google((path) =>
+      path.startsWith("/messages/m1") ? original : { body: { id: "m9", threadId: "t1" } },
+    );
+
+    const sentEmail = await gmail.sendGmailEmail("ada", {
+      to: [],
+      cc: ["alan@example.test"],
+      bcc: [],
+      body: "Thanks, looks right.",
+      replyToMessageId: "m1",
+    });
+
+    expect(sentEmail).toEqual({
+      threadId: "t1",
+      to: "grace@example.test",
+      subject: "Re: Quarterly numbers",
+    });
+
+    // The same send, as the tool a model calls reports it.
+    const forModel = await gmail.sendGmailEmailForModel("ada", {
+      to: ["grace@example.test"],
+      cc: [],
+      bcc: [],
+      subject: "Lunch",
+      body: "Thursday?",
+    });
+    expect(forModel).toEqual({
+      threadId: "t1",
+      account: "ada@example.test",
+      to: "grace@example.test",
+      subject: "Lunch",
+      status: "sent",
+      sentAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+    const send = requests.find((r) => r.path === "/messages/send")!;
+    expect(send.method).toBe("POST");
+    expect(send.body!.threadId).toBe("t1");
+    const [head, body] = Buffer.from(send.body!.raw!, "base64url")
+      .toString("utf8")
+      .split("\r\n\r\n");
+    expect(head.split("\r\n")).toEqual(
+      expect.arrayContaining([
+        "To: grace@example.test",
+        "Cc: alan@example.test",
+        "Subject: Re: Quarterly numbers",
+        "In-Reply-To: <abc@mail.example.test>",
+      ]),
+    );
+    expect(Buffer.from(body, "base64").toString("utf8")).toBe("Thanks, looks right.");
+    expect(requests.some((r) => r.path.startsWith("/drafts"))).toBe(false);
+  });
+
   it("refuses a draft with nobody to send to, or a new one with no subject", async () => {
     const requests = google(() => ({ body: {} }));
     const base = { cc: [], bcc: [], body: "Hi" };
@@ -664,7 +784,12 @@ describe("failures", () => {
 
   it.each([
     [404, {}, /no message or thread with that ID/],
-    [429, {}, /limiting requests/],
+    [429, {}, /limiting requests for this account\. Try again in a minute\.$/],
+    [
+      429,
+      { error: { message: "Too many concurrent requests for user" } },
+      /Try again in a minute\. Google said: Too many concurrent requests for user$/,
+    ],
     [403, { error: { message: "Gmail API has not been used" } }, /Gmail API has not been used/],
     [500, {}, /returned an error/],
   ])("explains a %i from Gmail", async (status, body, message) => {

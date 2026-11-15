@@ -1670,17 +1670,37 @@ describe("agent presentation regressions", () => {
     expect(mocks.scrollToOffset).not.toHaveBeenCalled();
   });
 
-  it("shows a live working status with elapsed time and session errors after the transcript", async () => {
+  it("times a running turn in its header and shows session errors after the transcript", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-26T12:00:00Z"));
     mocks.snapshot!.status = "running";
     mocks.snapshot!.activeTurn = { startedAt: Date.now() - 65_000 };
     mocks.snapshot!.messages = [{ role: "user", id: "first", content: "Go" }];
     await render();
-    expect(container.textContent).toContain("Working");
-    expect(container.textContent).toContain("1m 5s");
+    const header = () => container.querySelectorAll('[data-testid="agent-run-header"]');
+    // Before any reply: the timer, then one live row.
+    expect(header()).toHaveLength(1);
+    expect(header()[0]!.textContent).toBe("Working for 1m 5s");
+    expect(container.querySelectorAll('[role="progressbar"][aria-label="Thinking"]')).toHaveLength(1);
     await act(async () => vi.advanceTimersByTime(2000));
-    expect(container.textContent).toContain("1m 7s");
+    expect(header()[0]!.textContent).toBe("Working for 1m 7s");
+    // Once the turn has rows, the timer leads its first row and stays there.
+    mocks.snapshot!.messages = [
+      ...mocks.snapshot!.messages,
+      { role: "assistant", id: "progress", content: [{ type: "text", text: "Looking first." }] },
+      { role: "assistant", id: "tool-1", content: [{ type: "toolCall", id: "call", name: "bash", arguments: { command: "ls" } }] },
+    ];
+    await render();
+    expect(header()).toHaveLength(1);
+    expect(header()[0]!.closest('[data-testid^="agent-transcript-cell:"]')?.textContent).toContain(
+      "Looking first.",
+    );
+    // Compaction has its own status line; the timer steps aside.
+    mocks.snapshot!.state.isCompacting = true;
+    await render();
+    expect(header()).toHaveLength(0);
+    expect(container.textContent).toContain("Compacting context");
+    mocks.snapshot!.state.isCompacting = false;
     mocks.snapshot!.status = "idle";
     mocks.snapshot!.error = "The agent stopped unexpectedly.";
     await render();
@@ -1688,7 +1708,47 @@ describe("agent presentation regressions", () => {
     expect(container.textContent).toContain("The agent stopped unexpectedly.");
   });
 
-  it("settles earlier work in a running turn and keeps only the newest row live", async () => {
+  it("lists what a turn changed under its answer, folders closed, with the turn's actions below", async () => {
+    mocks.snapshot!.messages = [
+      { role: "user", id: "first", content: "Add the retry helper" },
+      { role: "assistant", id: "answer", content: [{ type: "text", text: "The retry helper is in place." }] },
+      {
+        role: "custom", customType: "overtchat_turn_changes", display: false, timestamp: 5,
+        changes: {
+          base: "a".repeat(40), head: "b".repeat(40),
+          files: [
+            { path: "README.md", additions: 2, deletions: 0 },
+            { path: "apps/web/lib/retry.ts", additions: 1180, deletions: 12 },
+            { path: "apps/web/public/logo.png", additions: 0, deletions: 0 },
+          ],
+          total: { files: 5, additions: 1300, deletions: 14 },
+        },
+      },
+    ];
+    await render();
+    const card = container.querySelector('[data-testid="agent-turn-changes"]')!;
+    const files = () =>
+      [...card.querySelectorAll('[data-testid="agent-turn-changes-file"]')].map((row) => row.textContent);
+    // The count, the lines, one closed folder with its own lines, and the rest.
+    expect(card.textContent).toBe("5 changed files+1.3k-14apps/web+1.2k-12README.md+2-0and 2 more files");
+    expect(files()).toEqual(["README.md+2-0"]);
+    // The answer, the card, then the turn's actions, in one cell.
+    const cell = card.closest('[data-testid^="agent-transcript-cell:"]')!;
+    expect(cell.querySelector('[aria-label="Copy response"]')).not.toBeNull();
+    expect(container.querySelectorAll('[aria-label="Copy response"]')).toHaveLength(1);
+
+    const folder = card.querySelector<HTMLElement>('[aria-label="apps/web"]')!;
+    expect(folder.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => folder.click());
+    expect(files()).toEqual(["README.md+2-0"]);
+    await act(async () => card.querySelector<HTMLElement>('[aria-label="Expand all folders"]')!.click());
+    // A binary file counts no lines, so it shows none.
+    expect(files()).toEqual(["retry.ts+1.2k-12", "logo.png", "README.md+2-0"]);
+    await act(async () => card.querySelector<HTMLElement>('[aria-label="Collapse all folders"]')!.click());
+    expect(files()).toEqual(["README.md+2-0"]);
+  });
+
+  it("keeps a running turn's reasoning and tool calls in one live group", async () => {
     mocks.snapshot!.status = "running";
     mocks.snapshot!.messages = [
       { role: "user", id: "current-user", content: "Check the files" },
@@ -1698,16 +1758,50 @@ describe("agent presentation regressions", () => {
       { role: "assistant", id: "think-2", content: [{ type: "thinking", thinking: "Now read it." }] },
     ];
     await render();
-    expect(container.textContent).toContain("Thoughts");
-    expect(container.textContent).toContain("Thinking");
-    expect(container.textContent?.match(/Thinking/g)).toHaveLength(1);
+    // The group's own spinner is the turn's one live row; no "Thinking" row joins it.
+    const spinners = () =>
+      container.querySelectorAll(
+        '[role="progressbar"][aria-label="Working"], [role="progressbar"][aria-label="Thinking"]',
+      );
+    const thought = () => container.querySelector('[data-testid="agent-live-thought"]');
+    // The group shows the step it is on under its newest thought, not a count.
+    expect(container.querySelector('button[aria-label="Thinking"]')).not.toBeNull();
+    expect(thought()?.textContent).toBe("Now read it.");
+    expect(container.textContent).not.toContain("Ran 1 command");
+    expect(container.textContent).not.toContain("Thoughts");
+    expect(spinners()).toHaveLength(1);
     mocks.snapshot!.messages = [
       ...mocks.snapshot!.messages,
       { role: "assistant", id: "tool-2", content: [{ type: "toolCall", id: "call-2", name: "bash", arguments: { command: "cat README.md" } }] },
     ];
     await render();
-    expect(container.textContent).not.toContain("Thinking");
-    expect(container.textContent?.match(/Thoughts/g)).toHaveLength(2);
+    expect(container.querySelector('button[aria-label="Running: cat README.md"]')).not.toBeNull();
+    expect(thought()?.textContent).toBe("Now read it.");
+    expect(spinners()).toHaveLength(1);
+    // Between steps the finished one stays as the live row.
+    mocks.snapshot!.messages = [
+      ...mocks.snapshot!.messages,
+      { role: "toolResult", toolCallId: "call-2", content: [{ type: "text", text: "# Demo" }] },
+    ];
+    await render();
+    expect(container.querySelector('button[aria-label="Terminal: cat README.md"]')).not.toBeNull();
+    expect(spinners()).toHaveLength(1);
+    // Reasoning is a one-line step inside the group until it is opened.
+    await click("Terminal: cat README.md");
+    expect(thought()).toBeNull();
+    expect(container.querySelectorAll('button[aria-label="Thought"]')).toHaveLength(2);
+    expect(container.textContent).toContain("Look first.");
+    await click("Thought");
+    expect(container.textContent?.match(/Look first\./g)).toHaveLength(1);
+    // A failed last step is not progress: the count returns, with the turn's own row.
+    mocks.snapshot!.messages = [
+      ...mocks.snapshot!.messages,
+      { role: "assistant", id: "tool-3", content: [{ type: "toolCall", id: "call-3", name: "bash", arguments: { command: "false" } }] },
+      { role: "toolResult", toolCallId: "call-3", isError: true, content: [{ type: "text", text: "exit 1" }] },
+    ];
+    await render();
+    expect(container.textContent).toContain("Ran 3 commands, 1 failed");
+    expect(container.querySelectorAll('[role="progressbar"][aria-label="Thinking"]')).toHaveLength(1);
   });
 });
 

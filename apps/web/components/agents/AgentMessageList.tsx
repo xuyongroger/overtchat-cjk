@@ -1,7 +1,7 @@
 "use client";
 
 import { writeText as clipboardWriteText } from "clipboard-polyfill";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { useStickToBottom } from "use-stick-to-bottom";
 import {
@@ -38,7 +38,7 @@ import {
   agentActivitySequencePosition,
   agentActiveTurnStart,
   agentResponseActions,
-  describeAgentActivity,
+  agentActivityIsLive,
   presentAgentError,
   projectAgentTranscript,
   foldAgentTranscript,
@@ -51,17 +51,25 @@ import {
 import { cn } from "@/lib/utils";
 import {
   AgentActivityGroup,
+  AgentLiveRow,
+  AgentRunHeader,
   AgentRunIndicator,
   formatAgentElapsed,
   type AgentRunActivity,
 } from "./AgentActivity";
 import { AgentTaskProgressCard } from "./AgentTaskList";
+import { AgentTurnChangesCard } from "./AgentTurnChanges";
 import { AgentForkMenu } from "./AgentForkMenu";
 import { AgentRewindMenu } from "./AgentRewindMenu";
 import type { AgentRewindMode } from "@overtchat/agent-bridge";
 import { AgentLinkIcon } from "./AgentLinkIcon";
 import { AgentWorkspaceLink } from "./AgentWorkspaceLink";
-import { AgentTranscriptMotion, useAgentDisclosureAnchor } from "./AgentTranscriptMotion";
+import {
+  AgentDisclosureContext,
+  AgentTranscriptMotion,
+  useAgentDisclosureAnchor,
+  useAgentScrollRelease,
+} from "./AgentTranscriptMotion";
 import { serverUrl } from "@/lib/api-url";
 
 export type { AgentRunActivity } from "./AgentActivity";
@@ -184,9 +192,33 @@ export function AgentMessageList({
     [projectedTranscript, unsettled, expandedTurns],
   );
   const anchorDisclosure = useAgentDisclosureAnchor();
-  const toggleWork = (key: string, button: HTMLElement) => {
+  const scrollRelease = useAgentScrollRelease(scrollRef, stopScroll);
+  const holdDisclosure = (control: HTMLElement) => {
     stopScroll();
-    anchorDisclosure(button, scrollRef.current);
+    anchorDisclosure(control, scrollRef.current);
+  };
+  const latestPrompt = useMemo(() => {
+    let count = 0;
+    let id: unknown;
+    for (const message of messages) {
+      if (roleOf(message) !== "user") continue;
+      count += 1;
+      id = recordOf(message)?.id;
+    }
+    return { count, id };
+  }, [messages]);
+  const previousPrompt = useRef(latestPrompt);
+  useEffect(() => {
+    const previous = previousPrompt.current;
+    previousPrompt.current = latestPrompt;
+    // Sending a prompt returns the reader to its reply, wherever they had scrolled.
+    // Older history adds prompts too, but leaves the latest one unchanged.
+    if (latestPrompt.count > previous.count && latestPrompt.id !== previous.id) {
+      void scrollToBottom("instant");
+    }
+  }, [latestPrompt, scrollToBottom]);
+  const toggleWork = (key: string, button: HTMLElement) => {
+    holdDisclosure(button);
     setExpandedTurns((current) => {
       const next = new Set(current);
       if (next.has(key)) next.delete(key);
@@ -203,12 +235,18 @@ export function AgentMessageList({
     transcript.forEach((item, index) => {
       const previousGroup = groups.at(-1);
       const previousItem = previousGroup?.at(-1)?.item;
+      // An answer moves as one with what closes it: its changes, its footer.
+      const answer = previousItem?.type === "turn_changes"
+        ? previousGroup?.at(-2)?.item
+        : previousItem;
       if (
         previousGroup &&
-        item.type === "turn_footer" &&
-        item.messageId !== null &&
-        previousItem?.type === "assistant_text" &&
-        previousItem.messageId === item.messageId
+        answer?.type === "assistant_text" &&
+        (item.type === "turn_changes"
+          ? previousItem === answer
+          : item.type === "turn_footer" &&
+            item.messageId !== null &&
+            answer.messageId === item.messageId)
       ) {
         previousGroup.push({ item, index });
       } else {
@@ -219,10 +257,12 @@ export function AgentMessageList({
   }, [transcript]);
   const trailingItem = transcript.at(-1);
   const activeTurnStart = agentActiveTurnStart(transcript, streaming);
+  // The timer belongs to the turn, so it leads the turn's rows from start to end.
+  const runHeaderVisible = activity === "working" && !question;
   const activityAlreadyVisible =
     (activity === "compacting" && transcript.some((item) => item.type === "compaction" && item.active)) ||
     (activity === "working" && streaming && trailingItem?.type === "activity" &&
-      describeAgentActivity(trailingItem.entries, true).status === "running");
+      agentActivityIsLive(trailingItem.entries));
 
   return (
     <div
@@ -232,7 +272,9 @@ export function AgentMessageList({
       <div
         ref={scrollRef}
         className="h-full overflow-y-auto overscroll-contain"
+        {...scrollRelease}
       >
+        <AgentDisclosureContext.Provider value={holdDisclosure}>
         <div
           ref={contentRef}
           className="mx-auto flex min-h-full w-full max-w-3xl flex-col px-4 pt-8 pb-8"
@@ -281,6 +323,7 @@ export function AgentMessageList({
                       previous &&
                       (item.type === "activity" ||
                         previous.type === "activity" ||
+                        item.type === "turn_changes" ||
                         item.type === "turn_footer");
                     return (
                       <div
@@ -291,8 +334,15 @@ export function AgentMessageList({
                             sequencePosition === "last") &&
                             "mt-0",
                           item.type === "turn_footer" && "mt-2",
+                          runHeaderVisible && index === activeTurnStart && index > 0 && "mt-6",
                         )}
                       >
+                        {runHeaderVisible && index === activeTurnStart && (
+                          <AgentRunHeader
+                            startedAt={activityStartedAt}
+                            className={item.type === "activity" ? "mb-3" : "mb-6"}
+                          />
+                        )}
                         <AgentTranscriptRow
                           speech={speech}
                           item={item}
@@ -313,18 +363,29 @@ export function AgentMessageList({
                   })}
                 </AgentTranscriptMotion>
               ))}
-              {activity && !question && !activityAlreadyVisible && (
-                <AgentRunIndicator
-                  activity={activity}
+              {runHeaderVisible && activeTurnStart >= transcript.length && (
+                <AgentRunHeader
                   startedAt={activityStartedAt}
-                  providerLabel={providerLabel}
+                  className={transcript.length > 0 ? "mt-6" : undefined}
                 />
+              )}
+              {activity && !question && !activityAlreadyVisible && (
+                activity === "working" ? (
+                  <AgentLiveRow providerLabel={providerLabel} />
+                ) : (
+                  <AgentRunIndicator
+                    activity={activity}
+                    startedAt={activityStartedAt}
+                    providerLabel={providerLabel}
+                  />
+                )
               )}
               {question && <div className="mt-4">{question}</div>}
               {error && <AgentErrorNotice error={presentAgentError(error)} />}
             </div>
           )}
         </div>
+        </AgentDisclosureContext.Provider>
       </div>
 
       {!isAtBottom && !suppressScrollButton && (
@@ -374,6 +435,22 @@ function AgentTranscriptRow({
   onImplementPlan: (plan: string) => void;
   activitySequencePosition: AgentActivitySequencePosition | null;
 }) {
+  const actionBar = responseActions && (
+    <div className="mt-2">
+      <MessageActions show alwaysVisible>
+        <AgentCopyButton text={responseActions.text} disabled={actionsDisabled} />
+        <AgentSpeakButton id={item.key} text={responseActions.text} speech={speech} />
+        {canForkMessages && responseActions.messageId && (
+          <AgentForkMenu
+            disabled={actionsDisabled}
+            onFork={(chooseWorkspace) =>
+              onForkMessage(responseActions.messageId!, chooseWorkspace)
+            }
+          />
+        )}
+      </MessageActions>
+    </div>
+  );
   if (item.type === "compaction") {
     return (
       <div role="separator" aria-label={item.label} data-testid="agent-compaction"
@@ -421,22 +498,15 @@ function AgentTranscriptRow({
     return (
       <div className="group/assistant relative text-sm leading-relaxed">
         <Markdown streaming={active}>{item.text}</Markdown>
-        {responseActions && (
-          <div className="mt-2">
-            <MessageActions show alwaysVisible>
-              <AgentCopyButton text={responseActions.text} disabled={actionsDisabled} />
-              <AgentSpeakButton id={item.key} text={responseActions.text} speech={speech} />
-              {canForkMessages && responseActions.messageId && (
-                <AgentForkMenu
-                  disabled={actionsDisabled}
-                  onFork={(chooseWorkspace) =>
-                    onForkMessage(responseActions.messageId!, chooseWorkspace)
-                  }
-                />
-              )}
-            </MessageActions>
-          </div>
-        )}
+        {actionBar}
+      </div>
+    );
+  }
+  if (item.type === "turn_changes") {
+    return (
+      <div>
+        <AgentTurnChangesCard changes={item.changes} />
+        {actionBar}
       </div>
     );
   }
@@ -653,11 +723,19 @@ function AgentSpeakButton({
   );
 }
 
-function AgentCopyButton({ text, disabled }: { text: string; disabled: boolean }) {
+function AgentCopyButton({
+  text,
+  disabled,
+  subject = "response",
+}: {
+  text: string;
+  disabled: boolean;
+  subject?: "response" | "message";
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <MessageActionButton
-      label={copied ? "Copied response" : "Copy response"}
+      label={copied ? `Copied ${subject}` : `Copy ${subject}`}
       icon={copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
       disabled={disabled}
       onClick={() => {
@@ -795,6 +873,7 @@ function UserMessage({
         ];
       })
     : [];
+  const rewindable = !!messageId && !messageId.startsWith("submission:");
   return (
     <div className="group/user relative flex flex-col items-end gap-2">
       {images.map((image, index) => (
@@ -808,21 +887,84 @@ function UserMessage({
       ))}
       {(text || images.length > 0) && (
         <div className="relative min-w-0 max-w-[80%]">
-          {text && (
-            <div className="rounded-2xl bg-secondary px-4 py-2.5 text-sm whitespace-pre-wrap wrap-anywhere text-secondary-foreground">
-              {text}
-            </div>
-          )}
-          {messageId && !messageId.startsWith("submission:") && (
-            <div className="absolute right-full bottom-0 mr-1 opacity-0 motion-opacity group-hover/user:opacity-100 group-focus-within/user:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100">
-              <AgentRewindMenu
-                options={rewindOptions}
-                disabled={actionsDisabled}
-                onRewind={(mode) => onRewindMessage(messageId, mode)}
-              />
+          {text && <UserMessageText text={text} />}
+          {(text || rewindable) && (
+            <div className="absolute right-full bottom-0 mr-1 flex items-center gap-0.5 opacity-0 motion-opacity group-hover/user:opacity-100 group-focus-within/user:opacity-100 has-[[data-popup-open]]:opacity-100 [@media(hover:none)]:opacity-100">
+              {rewindable && messageId && (
+                <AgentRewindMenu
+                  options={rewindOptions}
+                  disabled={actionsDisabled}
+                  onRewind={(mode) => onRewindMessage(messageId, mode)}
+                />
+              )}
+              {text && (
+                <AgentCopyButton text={text} disabled={false} subject="message" />
+              )}
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** A prompt taller than this is folded to `USER_MESSAGE_FOLDED_HEIGHT`. */
+const USER_MESSAGE_FOLD_THRESHOLD = 360;
+const USER_MESSAGE_FOLDED_HEIGHT = 240;
+
+/** A prompt's text. A long one is folded so the reply stays in reach. */
+function UserMessageText({ text }: { text: string }) {
+  const body = useRef<HTMLDivElement>(null);
+  const [tall, setTall] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  // Measured before paint, so a long prompt never shows at full height first.
+  useLayoutEffect(() => {
+    const element = body.current;
+    if (!element) return;
+    // scrollHeight is the full text height whether or not it is folded.
+    const measure = () =>
+      setTall(element.scrollHeight > USER_MESSAGE_FOLD_THRESHOLD);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const folded = tall && !expanded;
+  return (
+    <div
+      className="rounded-2xl bg-secondary px-4 py-2.5 text-sm text-secondary-foreground"
+      data-testid="agent-user-message"
+    >
+      <div
+        ref={body}
+        className={cn(
+          "whitespace-pre-wrap wrap-anywhere",
+          folded &&
+            "overflow-hidden [mask-image:linear-gradient(to_bottom,black_calc(100%-3rem),transparent)]",
+        )}
+        style={folded ? { maxHeight: USER_MESSAGE_FOLDED_HEIGHT } : undefined}
+      >
+        {text}
+      </div>
+      {tall && (
+        <button
+          type="button"
+          aria-expanded={expanded}
+          onClick={(event) => {
+            const bubble = event.currentTarget.parentElement;
+            setExpanded((current) => !current);
+            // Folding a prompt read from its end must not leave it above the
+            // viewport.
+            if (expanded) {
+              requestAnimationFrame(() =>
+                bubble?.scrollIntoView({ block: "nearest" }),
+              );
+            }
+          }}
+          className="mt-1.5 cursor-pointer text-xs font-medium text-muted-foreground motion-colors hover:text-foreground"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
       )}
     </div>
   );
@@ -837,13 +979,12 @@ function Markdown({
 }) {
   return (
     <Streamdown
-      className={AGENT_MARKDOWN_CLASSES}
+      className={cn(AGENT_MARKDOWN_CLASSES, streaming && "motion-stream-blocks")}
       plugins={STREAMDOWN_PLUGINS}
       remarkPlugins={AGENT_REMARK_PLUGINS}
       allowedTags={AGENT_MARKDOWN_ALLOWED_TAGS}
       components={AGENT_MARKDOWN_COMPONENTS}
       isAnimating={streaming}
-      caret={streaming ? "block" : undefined}
     >
       {children}
     </Streamdown>

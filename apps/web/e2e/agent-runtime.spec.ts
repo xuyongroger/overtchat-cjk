@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { groupAgentsByWorkspace } from "./helpers/agent-attention";
-import { _electron, expect, test, type ElectronApplication, type Locator } from "@playwright/test";
+import { _electron, expect, test, type ElectronApplication, type Locator, type Page } from "@playwright/test";
 import type {
   AgentConnectionListItem,
   AgentRuntimeSnapshot,
@@ -780,6 +780,7 @@ test("shows durable turn activity without changing completed tool status", async
   const submittedCommands: Array<Record<string, unknown>> = [];
   const workspaceDirectoryRequests: string[] = [];
   const workspaceFileRequests: string[] = [];
+  const workspaceDiffRequests: string[] = [];
   await page.exposeFunction(
     "__setAgentRuntimeAvailable",
     (available: boolean) => {
@@ -987,6 +988,12 @@ test("shows durable turn activity without changing completed tool status", async
                 indexStatus: null,
                 worktreeStatus: "M",
               },
+              {
+                path: "removed.ts",
+                originalPath: null,
+                indexStatus: null,
+                worktreeStatus: "D",
+              },
             ],
           },
         }),
@@ -1032,6 +1039,24 @@ test("shows durable turn activity without changing completed tool status", async
                       symlink: false,
                     },
                     {
+                      name: "rows.csv",
+                      path: "rows.csv",
+                      kind: "file",
+                      symlink: false,
+                    },
+                    {
+                      name: "logo.svg",
+                      path: "logo.svg",
+                      kind: "file",
+                      symlink: false,
+                    },
+                    {
+                      name: "shot.png",
+                      path: "shot.png",
+                      kind: "file",
+                      symlink: false,
+                    },
+                    {
                       name: "generated.log",
                       path: "generated.log",
                       kind: "file",
@@ -1051,6 +1076,45 @@ test("shows durable turn activity without changing completed tool status", async
       const filePath =
         new URL(route.request().url()).searchParams.get("path") ?? "README.md";
       workspaceFileRequests.push(filePath);
+      if (filePath === "shot.png") {
+        // Images are only sent to a client that asked for them.
+        const images =
+          new URL(route.request().url()).searchParams.get("images") === "1";
+        await route.fulfill(
+          images
+            ? {
+                contentType: "application/json",
+                body: JSON.stringify({
+                  file: {
+                    kind: "image",
+                    encoding: "base64",
+                    mediaType: "image/png",
+                    path: filePath,
+                    content: TEST_PNG.toString("base64"),
+                    size: TEST_PNG.length,
+                    modifiedAt: 100,
+                  },
+                }),
+              }
+            : {
+                status: 400,
+                contentType: "application/json",
+                body: JSON.stringify({
+                  error: "Binary files cannot be previewed.",
+                }),
+              },
+        );
+        return;
+      }
+      const content =
+        {
+          "README.md":
+            "# Runtime guide\n\nRead [the entry point](src/index.ts) and [the site](https://example.com).\n\n![Screenshot](./shot.png)\n\n- one\n- two\n",
+          "rows.csv": 'name,total\n"Ada, Countess",3\nGrace,5\n',
+          "logo.svg":
+            '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="teal"/></svg>',
+        }[filePath] ??
+        `export function AgentSessionView() {\n  return "${"long line ".repeat(40)}";\n}\n`;
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
@@ -1058,9 +1122,31 @@ test("shows durable turn activity without changing completed tool status", async
             kind: "text",
             encoding: "utf-8",
             path: filePath,
-            content: "export function AgentSessionView() {\n  return null;\n}\n",
-            size: 56,
+            content,
+            size: content.length,
             modifiedAt: 100,
+          },
+        }),
+      });
+    },
+  );
+  await page.route(
+    new RegExp("/api/agent-workspaces/workspace/file-diff(?:\\?.*)?$"),
+    async (route) => {
+      const filePath =
+        new URL(route.request().url()).searchParams.get("path") ?? "";
+      workspaceDiffRequests.push(filePath);
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          diff: {
+            path: filePath,
+            patch:
+              filePath === "removed.ts"
+                ? "diff --git a/removed.ts b/removed.ts\ndeleted file mode 100644\n--- a/removed.ts\n+++ /dev/null\n@@ -1 +0,0 @@\n-export const removed = true;\n"
+                : "diff --git a/src/index.ts b/src/index.ts\nindex 1111111..2222222 100644\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1,2 +1,2 @@\n export function AgentSessionView() {\n-  return undefined;\n+  return null;\n",
+            truncated: false,
+            binary: false,
           },
         }),
       });
@@ -1322,6 +1408,141 @@ test("shows durable turn activity without changing completed tool status", async
     .getByRole("button", { name: "Close src/index.ts" })
     .click();
   await expect(indexTab).toHaveCount(0);
+  await expect(
+    workspacePane.getByRole("tab", {
+      name: "Open apps/web/components/agents/AgentSessionView.tsx",
+    }),
+  ).toHaveAttribute("aria-selected", "true");
+
+  // Documents open rendered, and their links to workspace files open here.
+  await workspacePane.getByRole("tab", { name: "Files" }).click();
+  await workspacePane
+    .getByRole("button", { name: "README.md", exact: true })
+    .click();
+  const renderedMarkdown = workspacePane.getByTestId("agent-workspace-markdown");
+  await expect(
+    renderedMarkdown.getByRole("heading", { name: "Runtime guide" }),
+  ).toBeVisible();
+  await expect(renderedMarkdown.getByRole("listitem")).toHaveCount(2);
+  // A picture the document embeds loads from the workspace.
+  await expect(
+    renderedMarkdown.getByRole("img", { name: "Screenshot" }),
+  ).toHaveJSProperty("naturalWidth", 1);
+  await expect(workspacePane.locator("[data-workspace-code-token]")).toHaveCount(0);
+  // Links that leave the workspace keep the app's usual confirmation.
+  await expect(
+    renderedMarkdown.getByRole("button", { name: "the site" }),
+  ).toHaveAttribute("data-streamdown", "link");
+  await renderedMarkdown
+    .getByRole("button", { name: "the entry point" })
+    .click();
+  await expect(
+    workspacePane.getByRole("tab", { name: "Open src/index.ts" }),
+  ).toHaveAttribute("aria-selected", "true");
+
+  // Long lines scroll sideways until wrapping is turned on.
+  const wrapToggle = workspacePane.getByRole("button", {
+    name: "Wrap long lines",
+  });
+  const sourceLine = workspacePane.locator('[data-line="2"]');
+  await expect(wrapToggle).toHaveAttribute("aria-pressed", "false");
+  const unwrappedHeight = (await sourceLine.boundingBox())!.height;
+  await wrapToggle.click();
+  await expect(wrapToggle).toHaveAttribute("aria-pressed", "true");
+  await expect
+    .poll(async () => (await sourceLine.boundingBox())!.height)
+    .toBeGreaterThan(unwrappedHeight);
+  await wrapToggle.click();
+  await workspacePane
+    .getByRole("button", { name: "Close src/index.ts" })
+    .click();
+
+  // The source stays one click away, and the choice survives a tab switch.
+  await workspacePane.getByRole("tab", { name: "Open README.md" }).click();
+  await expect(renderedMarkdown).toBeVisible();
+  await expect(wrapToggle).toHaveCount(0);
+  await workspacePane.getByRole("button", { name: "Show source" }).click();
+  await expect(renderedMarkdown).toHaveCount(0);
+  await expect(workspacePane).toContainText("# Runtime guide");
+  await workspacePane.getByRole("tab", { name: "Files" }).click();
+  await workspacePane
+    .getByRole("button", { name: "rows.csv", exact: true })
+    .click();
+  await expect(
+    workspacePane.getByRole("columnheader", { name: "total" }),
+  ).toBeVisible();
+  await expect(
+    workspacePane.getByRole("cell", { name: "Ada, Countess" }),
+  ).toBeVisible();
+  await workspacePane.getByRole("tab", { name: "Open README.md" }).click();
+  await expect(workspacePane).toContainText("# Runtime guide");
+  await expect(
+    workspacePane.getByRole("button", { name: "Show preview" }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  await workspacePane.getByRole("tab", { name: "Files" }).click();
+  await workspacePane
+    .getByRole("button", { name: "logo.svg", exact: true })
+    .click();
+  await expect(workspacePane.getByRole("img", { name: "logo.svg" })).toHaveJSProperty(
+    "naturalWidth",
+    40,
+  );
+
+  await workspacePane.getByRole("tab", { name: "Files" }).click();
+  await workspacePane
+    .getByRole("button", { name: "shot.png", exact: true })
+    .click();
+  await expect(workspacePane.getByRole("img", { name: "shot.png" })).toHaveJSProperty(
+    "naturalWidth",
+    1,
+  );
+  await expect(wrapToggle).toHaveCount(0);
+
+  // A changed file opens on its changes, with its contents one click away.
+  expect(workspaceDiffRequests).toEqual([]);
+  await workspacePane.getByRole("tab", { name: "Files" }).click();
+  await workspacePane
+    .getByRole("button", { name: "src/index.ts Modified", exact: true })
+    .click();
+  const fileDiff = workspacePane.getByTestId("agent-workspace-diff");
+  await expect(fileDiff).toContainText("+  return null;");
+  await expect(fileDiff).toContainText("@@ -1,2 +1,2 @@");
+  await expect(fileDiff).not.toContainText("diff --git");
+  const changesToggle = workspacePane.getByRole("button", {
+    name: "Show changes",
+  });
+  await expect(changesToggle).toHaveAttribute("aria-pressed", "true");
+  await changesToggle.click();
+  await expect(fileDiff).toHaveCount(0);
+  await expect(
+    workspacePane.locator("[data-workspace-code-token]").first(),
+  ).toBeVisible();
+  await expect(changesToggle).toHaveAttribute("aria-pressed", "false");
+
+  // A deleted file has only its changes to show.
+  await workspacePane.getByRole("tab", { name: "Files" }).click();
+  await workspacePane
+    .getByRole("button", { name: "removed.ts Deleted", exact: true })
+    .click();
+  await expect(fileDiff).toContainText("-export const removed = true;");
+  await expect(changesToggle).toHaveCount(0);
+  expect(workspaceFileRequests).not.toContain("removed.ts");
+
+  await workspacePane.getByRole("button", { name: "Copy", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Copy path" }).click();
+  await expect(page.getByText("File path copied")).toBeVisible();
+
+  for (const path of [
+    "README.md",
+    "rows.csv",
+    "logo.svg",
+    "shot.png",
+    "src/index.ts",
+    "removed.ts",
+  ]) {
+    await workspacePane.getByRole("button", { name: `Close ${path}` }).click();
+  }
   await expect(
     workspacePane.getByRole("tab", {
       name: "Open apps/web/components/agents/AgentSessionView.tsx",
@@ -1628,10 +1849,10 @@ test("shows durable turn activity without changing completed tool status", async
     name: "Ran 1 command, completed",
   });
   await expect(completedCommandSummary).toBeVisible();
-  const liveActivity = page.getByRole("button", {
-    name: "Edited 1 file and searched 1 time, running",
-  });
-  await expect(liveActivity).toBeVisible();
+  // The running turn's last group names the step it is on, not a count.
+  const liveActivity = page.locator('[data-agent-live-step="true"]');
+  await expect(liveActivity).toContainText("Searching");
+  await expect(liveActivity).toContainText("runtimeStatus");
   const completedCommand = page.getByRole("button", {
     name: "Terminal: printf done, completed",
   });
@@ -2503,6 +2724,82 @@ test("shows durable turn activity without changing completed tool status", async
   await expect.poll(() => retryRequested).toBe(true);
 });
 
+test("fades each new block of a streaming reply in and draws no cursor", async ({ page }) => {
+  await page.goto(await setupUrl());
+  await page.locator("#name").fill("Fade Tester");
+  await page.locator("#email").fill("fade@overtchat-test.local");
+  await page.locator("#password").fill("test-password-123");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL("**/");
+  seedAgentSession();
+  const snapshot = runtimeSnapshot(Date.now());
+  const reply = (text: string) => [
+    { role: "user", id: "user", content: "Explain", timestamp: 100000 },
+    { role: "assistant", id: "answer", timestamp: 101000, content: [{ type: "text", text }] },
+  ];
+  snapshot.messages = reply("First paragraph.\n\n- one\n- two");
+  await page.route(new RegExp(`/api/agent-sessions/${SESSION_ID}(?:\\?.*)?$`), (route) => route.fulfill({ json: { snapshot } }));
+  await page.addInitScript(() => {
+    const sources: EventTarget[] = [];
+    let sequence = 0;
+    class FakeEventSource extends EventTarget {
+      onopen: ((event: Event) => void) | null = null;
+      constructor(url: string) {
+        super();
+        if (url.includes("/api/agent-sessions/")) sources.push(this);
+        setTimeout(() => this.onopen?.(new Event("open")), 0);
+      }
+      close() { const i = sources.indexOf(this); if (i >= 0) sources.splice(i, 1); }
+    }
+    Object.assign(window, {
+      EventSource: FakeEventSource,
+      __fadeEmit: (snapshot: unknown) => {
+        sequence += 1;
+        for (const source of sources) {
+          source.dispatchEvent(new MessageEvent("runtime", {
+            data: JSON.stringify({ epoch: "fade", sequence, type: "snapshot", data: snapshot }),
+          }));
+        }
+      },
+    });
+  });
+  await page.goto(`/agents/${SESSION_ID}`);
+  await expect(page.getByText("First paragraph.", { exact: true })).toBeVisible();
+  // The reply ends in a list, where a cursor used to drop onto a line of its own.
+  const cursor = await page.evaluate(() => {
+    const root = [...document.querySelectorAll("p")].find((node) => node.textContent === "First paragraph.")!.parentElement!;
+    return [...root.querySelectorAll("*")].map((node) => getComputedStyle(node, "::after").content);
+  });
+  expect(cursor.every((content) => content === "none" || content === "normal")).toBe(true);
+
+  // A block that arrives while the reply streams starts transparent and settles.
+  snapshot.messages = reply("First paragraph.\n\n- one\n- two\n\nSecond paragraph.");
+  const opacities = await page.evaluate(async (next) => {
+    const first = [...document.querySelectorAll("p")].find((node) => node.textContent === "First paragraph.")!;
+    const root = first.parentElement!;
+    (window as unknown as { __fadeEmit: (value: unknown) => void }).__fadeEmit(next);
+    const seen: number[] = [];
+    const end = performance.now() + 900;
+    while (performance.now() < end) {
+      await new Promise(requestAnimationFrame);
+      const block = [...root.children].find((node) => node.textContent === "Second paragraph.");
+      if (block) seen.push(Number(getComputedStyle(block).opacity));
+    }
+    return { seen, first: Number(getComputedStyle(first).opacity) };
+  }, snapshot);
+  expect(opacities.seen[0]).toBeLessThan(0.5);
+  expect(opacities.seen.at(-1)).toBe(1);
+  expect(opacities.first).toBe(1);
+
+  // A finished reply is not animated at all.
+  snapshot.status = "idle";
+  snapshot.activeTurn = null;
+  snapshot.state.isStreaming = false;
+  await page.evaluate((value) => (window as unknown as { __fadeEmit: (value: unknown) => void }).__fadeEmit(value), snapshot);
+  await expect(page.getByRole("button", { name: "Copy response", exact: true })).toHaveCount(1);
+  await expect(page.locator(".motion-stream-blocks")).toHaveCount(0);
+});
+
 test("folds long completed work smoothly, anchors disclosures, and respects reduced motion", async ({ page }, testInfo) => {
   await page.goto(await setupUrl());
   await page.locator("#name").fill("Motion Tester");
@@ -2577,6 +2874,513 @@ test("folds long completed work smoothly, anchors disclosures, and respects redu
   await expect(summary.locator("svg")).toHaveCSS("transition-duration", "0s");
   await expect(page.getByText("Answer line 0", { exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("completed-work.png") });
+});
+
+test("keeps reasoning inside its tool group, opens steps without nested scrolling, and folds long prompts", async ({ page }, testInfo) => {
+  await page.goto(await setupUrl());
+  await page.locator("#name").fill("Steps Tester");
+  await page.locator("#email").fill("steps@overtchat-test.local");
+  await page.locator("#password").fill("test-password-123");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL("**/");
+  seedAgentSession();
+  const prompt = Array.from({ length: 40 }, (_, i) => `Prompt line ${i}`).join("\n");
+  const script = [
+    "node - <<'JS'",
+    `console.log("${"migrations ".repeat(30)}");`,
+    ...Array.from({ length: 6 }, (_, i) => `console.log("line ${i}");`),
+    "JS",
+  ].join("\n");
+  const call = (id: string, name: string, args: Record<string, unknown>, timestamp: number) => ({
+    role: "assistant", id: `call-${id}`, timestamp,
+    content: [{ type: "toolCall", id, name, arguments: args }],
+  });
+  const result = (id: string, name: string, text: string, timestamp: number, isError = false) => ({
+    role: "toolResult", toolCallId: id, toolName: name, isError, timestamp,
+    content: [{ type: "text", text }],
+  });
+  const thought = (id: string, thinking: string, timestamp: number) => ({
+    role: "assistant", id, timestamp, content: [{ type: "thinking", id, thinking }],
+  });
+  const snapshot = runtimeSnapshot(Date.now());
+  snapshot.status = "idle";
+  snapshot.activeTurn = null;
+  snapshot.state.isStreaming = false;
+  snapshot.messages = [
+    { role: "user", id: "user", content: prompt, timestamp: 100000 },
+    thought("thought-1", "**Reading the runtime first.**\n\nThen I will run the checks.", 101000),
+    call("read", "read", { path: "apps/web/runtime.ts" }, 102000),
+    result("read", "read", "export const state = 'ready';", 103000),
+    call("resource", "read", { path: "proc://bg_22" }, 104000),
+    result("resource", "read", "exited", 105000),
+    thought("thought-2", "The migration count needs a direct query.", 106000),
+    call("query", "bash", { command: script }, 107000),
+    result("query", "bash", Array.from({ length: 40 }, (_, i) => `output ${i}`).join("\n"), 108000, true),
+    thought("thought-3", "That failed, so I will retry it another way.", 109000),
+    call("retry", "bash", { command: "npm test" }, 110000),
+    result("retry", "bash", "passed", 111000),
+    ...Array.from({ length: 12 }, (_, i) => [
+      call(`grep-${i}`, "grep", { pattern: `state ${i}`, path: "apps/web" }, 112000 + i * 2),
+      result(`grep-${i}`, "grep", "apps/web/runtime.ts", 112001 + i * 2),
+    ]).flat(),
+    { role: "assistant", id: "answer", timestamp: 165000, content: [{ type: "text", text: "Everything is in place." }] },
+  ];
+  await page.route(new RegExp(`/api/agent-sessions/${SESSION_ID}(?:\\?.*)?$`), (route) => route.fulfill({ json: { snapshot } }));
+  await page.addInitScript(() => {
+    class FakeEventSource extends EventTarget {
+      onopen: ((event: Event) => void) | null = null;
+      constructor() {
+        super();
+        setTimeout(() => this.onopen?.(new Event("open")), 0);
+      }
+      close() {}
+    }
+    Object.assign(window, { EventSource: FakeEventSource });
+  });
+  await page.setViewportSize({ width: 1280, height: 1400 });
+  await page.goto(`/agents/${SESSION_ID}`);
+
+  // A long prompt is folded, and can be copied without selecting it.
+  const bubble = page.getByTestId("agent-user-message");
+  await expect(bubble.getByRole("button", { name: "Show more" })).toBeVisible();
+  expect((await bubble.boundingBox())!.height).toBeLessThan(320);
+  await bubble.getByRole("button", { name: "Show more" }).click();
+  await expect(bubble.getByRole("button", { name: "Show less" })).toBeVisible();
+  expect((await bubble.boundingBox())!.height).toBeGreaterThan(700);
+  await bubble.getByRole("button", { name: "Show less" }).click();
+  await bubble.hover();
+  await expect(page.getByRole("button", { name: "Copy message" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("user-message-folded.png") });
+
+  // The turn's reasoning and tool calls are one group, counted by its tools.
+  await page.getByRole("button", { name: "Worked for 1m 5s", exact: true }).click();
+  await expect(page.locator('[data-testid="agent-activity-group"]')).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Thoughts" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Ran 2 commands, read 2 files, and searched 12 times, 1 failed, failed" }),
+  ).toHaveAttribute("aria-expanded", "true");
+  const thoughts = page.getByTestId("agent-thought-activity");
+  await expect(thoughts).toHaveCount(3);
+  await expect(thoughts.first()).toContainText("Reading the runtime first.");
+  await expect(page.getByText("Then I will run the checks.")).toHaveCount(0);
+  await thoughts.first().getByRole("button").click();
+  await expect(page.getByText("Then I will run the checks.")).toBeVisible();
+  await thoughts.first().getByRole("button").click();
+
+  // Step icons sit on the rail, inside the scroller that would clip them.
+  const details = page.getByTestId("agent-activity-details");
+  const clipped = await details.evaluate((scroller) => {
+    const edge = scroller.getBoundingClientRect().left;
+    return [...scroller.querySelectorAll("svg")].filter(
+      (icon) => icon.getBoundingClientRect().left < edge,
+    ).length;
+  });
+  expect(clipped).toBe(0);
+
+  // The failed command is open. The step list is long enough to scroll, and
+  // its cap has grown by the open detail, which wraps instead of scrolling
+  // sideways.
+  await expect(page.getByText("output 0", { exact: false }).first()).toBeVisible();
+  const sizes = await details.evaluate((scroller) => {
+    const command = [...scroller.querySelectorAll("pre")].find((pre) => pre.textContent?.startsWith("$ node"))!;
+    const detail = scroller.querySelector<HTMLElement>("[data-agent-step-detail]")!;
+    return {
+      scrolls: scroller.scrollHeight > scroller.clientHeight,
+      cap: parseFloat(getComputedStyle(scroller).maxHeight),
+      detail: detail.offsetHeight,
+      sideways: command.scrollWidth - command.clientWidth,
+    };
+  });
+  expect(sizes.scrolls).toBe(true);
+  expect(sizes.detail).toBeGreaterThan(200);
+  expect(Math.abs(sizes.cap - (400 + sizes.detail))).toBeLessThanOrEqual(1);
+  expect(sizes.sideways).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: testInfo.outputPath("activity-steps.png") });
+
+  // A file step opens its file beside the transcript; a resource URL does not.
+  await expect(page.getByRole("button", { name: "Open proc://bg_22" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Read: apps/web/runtime.ts, completed" }).hover();
+  await page.screenshot({ path: testInfo.outputPath("activity-steps-hover.png") });
+  await page.getByRole("button", { name: "Open apps/web/runtime.ts" }).click();
+  await expect(page.getByTestId("agent-workspace-pane")).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("activity-steps-file-open.png") });
+});
+
+test("lists what a turn changed under its answer and opens a changed file", async ({ page }, testInfo) => {
+  await page.goto(await setupUrl());
+  await page.locator("#name").fill("Changes Tester");
+  await page.locator("#email").fill("changes@overtchat-test.local");
+  await page.locator("#password").fill("test-password-123");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL("**/");
+  seedAgentSession();
+  const turnChanges = (head: string, changes: Record<string, unknown>, timestamp: number) => ({
+    role: "custom", customType: "overtchat_turn_changes", display: false, timestamp,
+    changes: { base: "a".repeat(40), head: head.repeat(40), ...changes },
+  });
+  const snapshot = runtimeSnapshot(Date.now());
+  snapshot.status = "idle";
+  snapshot.activeTurn = null;
+  snapshot.state.isStreaming = false;
+  snapshot.messages = [
+    { role: "user", id: "user-1", content: "Add the retry helper", timestamp: 100000 },
+    {
+      role: "assistant", id: "call-edit", timestamp: 101000,
+      content: [{ type: "toolCall", id: "edit", name: "edit", arguments: { path: "apps/web/lib/retry.ts" } }],
+    },
+    { role: "toolResult", toolCallId: "edit", toolName: "edit", isError: false, timestamp: 102000, content: [{ type: "text", text: "ok" }] },
+    { role: "assistant", id: "answer-1", timestamp: 104000, content: [{ type: "text", text: "The retry helper is in place." }] },
+    turnChanges("b", {
+      files: [
+        { path: "README.md", additions: 2, deletions: 0 },
+        { path: "apps/web/lib/retry.test.ts", additions: 40, deletions: 0 },
+        { path: "apps/web/lib/retry.ts", previousPath: "apps/web/lib/again.ts", additions: 1180, deletions: 12 },
+        { path: "apps/web/public/logo.png", additions: 0, deletions: 0 },
+      ],
+      total: { files: 6, additions: 1300, deletions: 14 },
+    }, 104500),
+    { role: "user", id: "user-2", content: "Fix the typo", timestamp: 200000 },
+    { role: "assistant", id: "answer-2", timestamp: 201000, content: [{ type: "text", text: "Fixed." }] },
+    turnChanges("c", {
+      files: [{ path: "notes.txt", additions: 1, deletions: 1 }],
+      total: { files: 1, additions: 1, deletions: 1 },
+    }, 201500),
+  ];
+  await page.route(new RegExp(`/api/agent-sessions/${SESSION_ID}(?:\\?.*)?$`), (route) => route.fulfill({ json: { snapshot } }));
+  await page.addInitScript(() => {
+    class FakeEventSource extends EventTarget {
+      onopen: ((event: Event) => void) | null = null;
+      constructor() {
+        super();
+        setTimeout(() => this.onopen?.(new Event("open")), 0);
+      }
+      close() {}
+    }
+    Object.assign(window, { EventSource: FakeEventSource });
+  });
+  await page.setViewportSize({ width: 1280, height: 1100 });
+  await page.goto(`/agents/${SESSION_ID}`);
+
+  // Each turn lists its own changes: the count, the lines, folders closed.
+  const cards = page.getByTestId("agent-turn-changes");
+  await expect(cards).toHaveCount(2);
+  const card = cards.first();
+  await expect(card.getByRole("heading", { name: "6 changed files" })).toBeVisible();
+  await expect(card.getByRole("group", { name: "1300 added, 14 removed" }).first()).toHaveText("+1.3k-14");
+  await expect(card.getByText("and 2 more files")).toBeVisible();
+  const files = card.getByTestId("agent-turn-changes-file");
+  await expect(files).toHaveCount(1);
+  await expect(files).toContainText("README.md");
+  const folder = card.getByRole("button", { name: /^apps\/web/ });
+  await expect(folder).toHaveAttribute("aria-expanded", "false");
+  await expect(folder.getByRole("group", { name: "1220 added, 12 removed" })).toBeVisible();
+  await expect(cards.last().getByRole("heading", { name: "1 changed file" })).toBeVisible();
+  await expect(cards.last().getByRole("button", { name: "Expand all folders" })).toHaveCount(0);
+
+  // The turn's actions sit under its changes, which sit under its answer.
+  const box = async (locator: ReturnType<typeof page.locator>) => (await locator.boundingBox())!;
+  const answer = await box(page.getByText("The retry helper is in place."));
+  const changes = await box(card);
+  const copy = await box(page.getByRole("button", { name: "Copy response", exact: true }).first());
+  expect(changes.y).toBeGreaterThan(answer.y + answer.height - 1);
+  expect(copy.y).toBeGreaterThan(changes.y + changes.height - 1);
+  await page.screenshot({ path: testInfo.outputPath("turn-changes-closed.png") });
+
+  // One folder opens on its own; the header control opens and closes them all.
+  await folder.click();
+  await expect(folder).toHaveAttribute("aria-expanded", "true");
+  await expect(files).toHaveCount(1);
+  await card.getByRole("button", { name: "Expand all folders" }).click();
+  await expect(files).toHaveCount(4);
+  await expect(card.getByRole("button", { name: "Open apps/web/lib/retry.ts" }))
+    .toHaveAttribute("title", "apps/web/lib/retry.ts (renamed from apps/web/lib/again.ts)");
+  // A binary file counts no lines, so it shows none.
+  await expect(card.getByRole("button", { name: "Open apps/web/public/logo.png" }).getByRole("group")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("turn-changes-open.png") });
+  await card.getByRole("button", { name: "Collapse all folders" }).click();
+  await expect(files).toHaveCount(1);
+
+  // A changed file opens beside the transcript.
+  await card.getByRole("button", { name: "Expand all folders" }).click();
+  await card.getByRole("button", { name: "Open apps/web/lib/retry.ts" }).click();
+  const pane = page.getByTestId("agent-workspace-pane");
+  await expect(pane).toBeVisible();
+  await expect(pane.getByRole("tab", { name: "Open apps/web/lib/retry.ts" })).toBeVisible();
+});
+
+type ScrollSnapshot = ReturnType<typeof runtimeSnapshot>;
+
+/** Opens a session whose reply the test can grow like a stream. */
+async function openScrollSession(page: Page, snapshot: ScrollSnapshot) {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(await setupUrl());
+  await page.locator("#name").fill("Scroll Tester");
+  await page.locator("#email").fill("scroll@overtchat-test.local");
+  await page.locator("#password").fill("test-password-123");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL("**/");
+  seedAgentSession();
+  await page.route(new RegExp(`/api/agent-sessions/${SESSION_ID}(?:\\?.*)?$`), (route) => route.fulfill({ json: { snapshot } }));
+  await page.addInitScript(() => {
+    const sources: EventTarget[] = [];
+    let sequence = 0;
+    let timer = 0;
+    let streamed: unknown = null;
+    class FakeEventSource extends EventTarget {
+      onopen: ((event: Event) => void) | null = null;
+      constructor(url: string) {
+        super();
+        if (url.includes("/api/agent-sessions/")) sources.push(this);
+        setTimeout(() => this.onopen?.(new Event("open")), 0);
+      }
+      close() { const i = sources.indexOf(this); if (i >= 0) sources.splice(i, 1); }
+    }
+    const emit = (snapshot: unknown) => {
+      sequence += 1;
+      for (const source of sources) {
+        source.dispatchEvent(new MessageEvent("runtime", {
+          data: JSON.stringify({ epoch: "scroll", sequence, type: "snapshot", data: snapshot }),
+        }));
+      }
+    };
+    Object.assign(window, {
+      EventSource: FakeEventSource,
+      __scrollEmit: emit,
+      // Grows the last assistant message every 40ms, like a streamed reply.
+      __scrollStream: (snapshot: { messages: Array<{ content: Array<{ text: string }> | string }> }) => {
+        window.clearInterval(timer);
+        streamed = snapshot;
+        let line = 0;
+        timer = window.setInterval(() => {
+          line += 1;
+          const part = (snapshot.messages.at(-1)!.content as Array<{ text: string }>)[0]!;
+          part.text += `\n\nLine ${line}`;
+          emit(snapshot);
+        }, 40);
+      },
+      // Returns the snapshot as it stands, so later states build on what is on screen.
+      __scrollStop: () => {
+        window.clearInterval(timer);
+        return streamed;
+      },
+    });
+  });
+  await page.goto(`/agents/${SESSION_ID}`);
+  await expect(page.getByText("Line 0", { exact: true })).toBeVisible();
+  const viewport = page.getByTestId("agent-message-list").locator("> div").first();
+  const gap = () => viewport.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
+  const toLatest = page.getByRole("button", { name: "Scroll to bottom", exact: true });
+  const stream = (value: ScrollSnapshot) =>
+    page.evaluate((streaming) => (window as unknown as { __scrollStream: (value: unknown) => void }).__scrollStream(streaming), value);
+  const stopStream = () =>
+    page.evaluate(() => (window as unknown as { __scrollStop: () => unknown }).__scrollStop()) as Promise<ScrollSnapshot>;
+  return { viewport, gap, toLatest, stream, stopStream };
+}
+
+test("stops following on upward input, returns for a new prompt, and holds an opened tool group in place", async ({ page }) => {
+  const code = ["```ts", ...Array.from({ length: 30 }, (_, i) => `const value${i} = ${i};`), "```"].join("\n");
+  const snapshot = runtimeSnapshot(Date.now());
+  snapshot.messages = [
+    { role: "user", id: "user", content: "Explain the limiter", timestamp: 100000 },
+    { role: "assistant", id: "answer", timestamp: 101000, content: [{ type: "text", text: `Here is the code.\n\n${code}\n\nLine 0` }] },
+  ];
+  const { gap, toLatest, stream, stopStream } = await openScrollSession(page, snapshot);
+
+  // Upward input over a nested scroller (a code block) must release the view while the reply grows.
+  await stream(snapshot);
+  await expect(page.getByText("Line 12", { exact: true })).toBeVisible();
+  await expect.poll(gap).toBeLessThan(40);
+  const block = (await page.locator("pre").first().boundingBox())!;
+  await page.mouse.move(block.x + 40, Math.max(block.y + 20, 120));
+  await page.mouse.wheel(0, -300);
+  await expect(toLatest).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(await gap()).toBeGreaterThan(250);
+  await expect(toLatest).toBeVisible();
+
+  // A new prompt returns the view to its reply.
+  const next = await stopStream();
+  expect(await gap()).toBeGreaterThan(250);
+  next.messages = [
+    ...next.messages,
+    { role: "user", id: "user-2", content: "And the refill?", timestamp: 200000 },
+    { role: "assistant", id: "answer-2", timestamp: 201000, content: [{ type: "text", text: "Reply 0" }] },
+  ];
+  await page.evaluate((streaming) => {
+    const api = window as unknown as { __scrollEmit: (value: unknown) => void; __scrollStream: (value: unknown) => void };
+    api.__scrollEmit(streaming);
+    api.__scrollStream(streaming);
+  }, next);
+  await expect(page.getByText("Line 8", { exact: true }).last()).toBeVisible();
+  await expect.poll(gap).toBeLessThan(40);
+  await expect(toLatest).toHaveCount(0);
+
+  // Opening a tool group at the bottom keeps the pressed row where it is.
+  const tools = await stopStream();
+  tools.messages = [
+    ...tools.messages,
+    ...Array.from({ length: 8 }, (_, i) => [
+      { role: "assistant", id: `call-${i}`, timestamp: 210000 + i * 2, content: [{ type: "toolCall", id: `tool-${i}`, name: "bash", arguments: { command: `echo ${i}` } }] },
+      { role: "toolResult", toolCallId: `tool-${i}`, toolName: "bash", isError: false, timestamp: 210001 + i * 2, content: [{ type: "text", text: `${i}` }] },
+    ]).flat(),
+  ];
+  await page.evaluate((value) => (window as unknown as { __scrollEmit: (value: unknown) => void }).__scrollEmit(value), tools);
+  const group = page.locator('[data-agent-live-step="true"]');
+  await expect(group).toContainText("echo 7");
+  await expect.poll(gap).toBeLessThan(40);
+  const before = (await group.boundingBox())!.y;
+  await group.click();
+  await expect(group).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("agent-tool-activity")).toHaveCount(8);
+  await page.waitForTimeout(400);
+  expect(Math.abs((await group.boundingBox())!.y - before)).toBeLessThan(2);
+});
+
+test("keeps following when upward input has nowhere to go, and hears scroll keys from the page", async ({ page }) => {
+  const snapshot = runtimeSnapshot(Date.now());
+  snapshot.messages = [
+    { role: "user", id: "user", content: "Explain the limiter", timestamp: 100000 },
+    { role: "assistant", id: "answer", timestamp: 101000, content: [{ type: "text", text: "Line 0" }] },
+  ];
+  const { viewport, gap, toLatest, stream } = await openScrollSession(page, snapshot);
+
+  // Nothing overflows yet, so scrolling up moves nothing and must not end the follow.
+  expect(await viewport.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeLessThan(2);
+  const box = (await viewport.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + 200);
+  await page.mouse.wheel(0, -300);
+  await page.keyboard.press("PageUp");
+  await stream(snapshot);
+  await expect(page.getByText("Line 40", { exact: true })).toBeVisible();
+  await expect.poll(gap).toBeLessThan(40);
+  await expect(toLatest).toHaveCount(0);
+
+  // A press on the reply leaves focus on the page; its scroll keys still release the view.
+  await page.getByText("Line 38", { exact: true }).click();
+  expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+  await page.keyboard.press("PageUp");
+  await expect(toLatest).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(await gap()).toBeGreaterThan(250);
+});
+
+test("times a running turn in its header, names its live step, and hands the header to the turn summary", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(await setupUrl());
+  await page.locator("#name").fill("Header Tester");
+  await page.locator("#email").fill("header@overtchat-test.local");
+  await page.locator("#password").fill("test-password-123");
+  await page.getByRole("button", { name: "Create account" }).click();
+  await page.waitForURL("**/");
+  seedAgentSession();
+  const snapshot = runtimeSnapshot(Date.now() - 12_000);
+  const prompt = { role: "user", id: "user", content: "Check this", timestamp: 100000 };
+  const progress = { role: "assistant", id: "progress", timestamp: 103000, content: [{ type: "text", text: "Looking at the runtime first." }] };
+  const call = { role: "assistant", id: "call", timestamp: 104000, content: [{ type: "toolCall", id: "tool", name: "bash", arguments: { command: "npm test" } }] };
+  const result = { role: "toolResult", toolCallId: "tool", toolName: "bash", isError: false, timestamp: 105000, content: [{ type: "text", text: "passed" }] };
+  const thought = { role: "assistant", id: "thought", timestamp: 103500, content: [{ type: "thinking", id: "thought", thinking: "**Running the suite**\n\nIt should pass." }] };
+  const answer = { role: "assistant", id: "answer", timestamp: 165000, content: [{ type: "text", text: "Everything passes." }] };
+  snapshot.messages = [prompt];
+  await page.route(new RegExp(`/api/agent-sessions/${SESSION_ID}(?:\\?.*)?$`), (route) => route.fulfill({ json: { snapshot } }));
+  await page.addInitScript(() => {
+    const sources: EventTarget[] = [];
+    let sequence = 0;
+    class FakeEventSource extends EventTarget {
+      onopen: ((event: Event) => void) | null = null;
+      constructor(url: string) {
+        super();
+        if (url.includes("/api/agent-sessions/")) sources.push(this);
+        setTimeout(() => this.onopen?.(new Event("open")), 0);
+      }
+      close() { const i = sources.indexOf(this); if (i >= 0) sources.splice(i, 1); }
+    }
+    Object.assign(window, {
+      EventSource: FakeEventSource,
+      __headerEmit: (snapshot: unknown) => {
+        sequence += 1;
+        for (const source of sources) {
+          source.dispatchEvent(new MessageEvent("runtime", {
+            data: JSON.stringify({ epoch: "header", sequence, type: "snapshot", data: snapshot }),
+          }));
+        }
+      },
+    });
+  });
+  const emit = (messages: unknown[]) => {
+    snapshot.messages = messages;
+    return page.evaluate((value) => (window as unknown as { __headerEmit: (value: unknown) => void }).__headerEmit(value), snapshot);
+  };
+  await page.goto(`/agents/${SESSION_ID}`);
+  const header = page.getByTestId("agent-run-header");
+  const live = page.getByTestId("agent-run-activity");
+  const top = async (locator: Locator) => (await locator.boundingBox())!.y;
+
+  // Before any reply: the timer under the prompt, and one live row after it.
+  await expect(header).toHaveText(/^Working for 1[2-9]s$/);
+  await expect(live).toHaveText("Thinking");
+  const headerTop = await top(header);
+  expect(headerTop).toBeGreaterThan(await top(page.getByText("Check this", { exact: true })));
+
+  // Text, then a running tool: the header does not move, and only one thing is live.
+  await emit([prompt, progress]);
+  await expect(page.getByText("Looking at the runtime first.", { exact: true })).toBeVisible();
+  await expect(header).toHaveCount(1);
+  expect(Math.abs((await top(header)) - headerTop)).toBeLessThan(2);
+  await expect(live).toHaveText("Thinking");
+  expect(await top(live)).toBeGreaterThan(await top(page.getByText("Looking at the runtime first.", { exact: true })));
+  await emit([prompt, progress, call]);
+  const step = page.locator('[data-agent-live-step="true"]');
+  const thoughtLine = page.getByTestId("agent-live-thought");
+  await expect(step).toContainText("Running");
+  await expect(step).toContainText("npm test");
+  await expect(thoughtLine).toHaveCount(0);
+  await expect(live).toHaveCount(0);
+  expect(Math.abs((await top(header)) - headerTop)).toBeLessThan(2);
+
+  // The group's newest thought leads the step, by its heading.
+  await emit([prompt, progress, thought, call]);
+  await expect(thoughtLine).toHaveText("Running the suite");
+  await expect(step).toContainText("npm test");
+  await expect(live).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("running-turn.png") });
+
+  // Between steps the finished one stays as the live row, so nothing blinks.
+  await emit([prompt, progress, thought, call, result]);
+  await expect(step).toContainText("Terminal");
+  await expect(step).toContainText("npm test");
+  await expect(live).toHaveCount(0);
+
+  // Opened, the group keeps its live line and lists every step under it.
+  await step.click();
+  await expect(step).toHaveAttribute("aria-expanded", "true");
+  await expect(thoughtLine).toHaveCount(0);
+  await expect(page.getByTestId("agent-thought-activity")).toBeVisible();
+  await step.click();
+  await expect(thoughtLine).toHaveText("Running the suite");
+
+  // A failed last step is not progress: the count returns, and the turn's own row.
+  await emit([prompt, progress, thought, call, { ...result, isError: true }]);
+  await expect(page.getByRole("button", { name: "Ran 1 command, 1 failed, failed" })).toBeVisible();
+  await expect(step).toHaveCount(0);
+  await expect(live).toHaveText("Thinking");
+
+  // The answer streams under the finished tool; the live row returns after it.
+  await emit([prompt, progress, call, result, answer]);
+  await expect(page.getByText("Everything passes.", { exact: true })).toBeVisible();
+  await expect(live).toHaveText("Thinking");
+  expect(Math.abs((await top(header)) - headerTop)).toBeLessThan(2);
+
+  // At the end the summary stands exactly where the timer was.
+  snapshot.status = "idle";
+  snapshot.activeTurn = null;
+  snapshot.state.isStreaming = false;
+  await emit([prompt, progress, call, result, answer]);
+  const summary = page.getByRole("button", { name: "Worked for 1m 5s", exact: true });
+  await expect(summary).toBeVisible();
+  await expect(header).toHaveCount(0);
+  await expect(live).toHaveCount(0);
+  await expect.poll(async () => Math.abs((await top(summary.locator(".."))) - headerTop)).toBeLessThan(2);
+  await page.screenshot({ path: testInfo.outputPath("settled-turn.png") });
 });
 
 test("preserves an OMP markdown answer through continuation, abort and reload", async ({
@@ -3134,7 +3938,7 @@ test("ends OMP turns when the agent yields to background work and starts a new t
     expect(await prompts()).toBe(2);
     // Stop ends a woken turn; the native abort leaves the job running.
     await writeFile(control, "wake-2");
-    await expect(indicator).toContainText("Working");
+    await expect(page.getByTestId("agent-run-header")).toContainText("Working");
     await expect(sidebarWorking.first()).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("omp-background-wake.png"), fullPage: true });
     await stopButton.click();
@@ -3143,7 +3947,7 @@ test("ends OMP turns when the agent yields to background work and starts a new t
     await expect(stopButton).toHaveCount(0);
     // The surviving job's result wakes the agent into a new turn.
     await writeFile(control, "wake-3");
-    await expect(indicator).toContainText("Working");
+    await expect(page.getByTestId("agent-run-header")).toContainText("Working");
     await writeFile(control, "settle");
     await expect(indicator).toHaveCount(0);
     await expect(stopButton).toHaveCount(0);

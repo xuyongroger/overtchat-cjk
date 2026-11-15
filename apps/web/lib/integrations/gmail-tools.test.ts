@@ -1,10 +1,14 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   conversationUsesGmail,
-  describeGmailDraft,
+  describeGmailEmail,
   describeGmailToolPart,
   gmailActivityLabel,
+  gmailEmailResult,
   groupMessageParts,
+  rememberGmailEmailResult,
+  replacedGmailEmailIds,
+  subscribeGmailEmailResults,
   type GmailToolPart,
 } from "@overtchat/shared";
 import { z } from "zod";
@@ -48,10 +52,18 @@ describe("availability", () => {
     expect(tools.gmailAccess("ada")).toEqual({ status: "unavailable" });
 
     connect();
-    expect(tools.gmailAccess("ada")).toEqual({ status: "available", alwaysOn: false });
+    expect(tools.gmailAccess("ada")).toEqual({
+      status: "available",
+      alwaysOn: false,
+      sendWithoutAsking: false,
+    });
     expect(tools.gmailAccess("grace")).toEqual({ status: "unavailable" });
     repository.setIntegrationAlwaysOn("ada", "gmail", true);
-    expect(tools.gmailAccess("ada")).toEqual({ status: "available", alwaysOn: true });
+    expect(tools.gmailAccess("ada")).toEqual({
+      status: "available",
+      alwaysOn: true,
+      sendWithoutAsking: false,
+    });
 
     repository.markIntegrationNeedsReconnect({
       userId: "ada",
@@ -112,9 +124,11 @@ describe("tool inputs", () => {
       | "gmail_read_thread"
       | "gmail_read_attachment"
       | "gmail_modify_labels"
+      | "gmail_compose"
+      | "gmail_send"
       | "gmail_create_draft",
   ) =>
-    tools.createGmailTools("ada")[name].inputSchema as {
+    tools.createGmailTools("ada", { compose: true, send: true })[name]!.inputSchema as {
       safeParse: (value: unknown) => { success: boolean };
     };
 
@@ -144,27 +158,136 @@ describe("tool inputs", () => {
     ).toBe(false);
   });
 
-  it("offers no way to send", () => {
-    expect(Object.keys(tools.createGmailTools("ada"))).toEqual([
+  it("offers no way to send, and one way to write an email", () => {
+    const common = [
       "gmail_search",
       "gmail_read_thread",
       "gmail_read_attachment",
       "gmail_list_labels",
       "gmail_modify_labels",
+    ];
+    // A client that shows a written email is told about gmail_compose. The
+    // draft tool still runs, for a chat whose loaded instructions name it.
+    const composing = { compose: true, send: false };
+    expect(Object.keys(tools.createGmailTools("ada", composing))).toEqual([
+      ...common,
+      "gmail_compose",
       "gmail_create_draft",
     ]);
+    expect(tools.gmailOfferedToolNames(composing)).toEqual([...common, "gmail_compose"]);
+    expect(tools.gmailToolPrompt(composing)).toContain("gmail_compose");
+    expect(tools.gmailToolPrompt(composing)).toContain("You cannot send mail.");
+    expect(tools.gmailToolPrompt(composing)).not.toContain("gmail_create_draft");
+
+    // Any other client keeps drafts saved in Gmail, and cannot compose.
+    const drafting = { compose: false, send: false };
+    expect(Object.keys(tools.createGmailTools("ada", drafting))).toEqual([
+      ...common,
+      "gmail_create_draft",
+    ]);
+    expect(tools.gmailOfferedToolNames(drafting)).toEqual([
+      ...common,
+      "gmail_create_draft",
+    ]);
+    expect(tools.gmailToolPrompt(drafting)).toContain("gmail_create_draft");
+    expect(tools.gmailToolPrompt(drafting)).toContain("You cannot send mail.");
+    expect(tools.gmailToolPrompt(drafting)).not.toContain("gmail_compose");
+    for (const options of [composing, drafting]) {
+      expect(JSON.stringify(tools.createGmailTools("ada", options))).not.toMatch(/gmail_send/);
+      expect(tools.gmailToolPrompt(options)).not.toContain("gmail_send");
+    }
   });
 
-  it("accepts only addresses as recipients and one-line subjects", () => {
-    const draft = schema("gmail_create_draft");
-    const body = "Hello";
-    expect(draft.safeParse({ to: ["grace@example.test"], subject: "Hi", body }).success).toBe(true);
-    // The check runs here; the schema a model reads stays short.
-    expect(JSON.stringify(z.toJSONSchema(draft as unknown as z.ZodType))).not.toContain("@");
-    expect(draft.safeParse({ body, replyToMessageId: "m1" }).success).toBe(true);
-    expect(draft.safeParse({ to: ["Grace <grace@example.test>"], body }).success).toBe(false);
-    expect(draft.safeParse({ to: ["grace@example.test\nBcc: x@y.z"], body }).success).toBe(false);
-    expect(draft.safeParse({ to: ["grace@example.test"], subject: "Hi\nBcc: x@y.z", body }).success).toBe(false);
+  it("gives a model a way to send only where the user allowed it", () => {
+    repository.saveIntegrationOauthClient("google", {
+      clientId: "client-1",
+      clientSecret: "secret-1",
+    });
+    connect();
+    // Off until the user turns it on, for Gmail alone.
+    expect(tools.gmailAccess("ada")).toMatchObject({ sendWithoutAsking: false });
+    expect(
+      repository.setIntegrationSettings("ada", "gmail", { sendWithoutAsking: true }),
+    ).toBe(true);
+    expect(tools.gmailAccess("ada")).toEqual({
+      status: "available",
+      alwaysOn: false,
+      sendWithoutAsking: true,
+    });
+    // The two choices are kept apart.
+    repository.setIntegrationSettings("ada", "gmail", { alwaysOn: true });
+    expect(tools.gmailAccess("ada")).toMatchObject({
+      alwaysOn: true,
+      sendWithoutAsking: true,
+    });
+
+    for (const compose of [true, false]) {
+      const options = { compose, send: true };
+      const writing = compose ? "gmail_compose" : "gmail_create_draft";
+      expect(Object.keys(tools.createGmailTools("ada", options))).toContain("gmail_send");
+      expect(tools.gmailOfferedToolNames(options).slice(-2)).toEqual(
+        compose ? ["gmail_compose", "gmail_send"] : ["gmail_send", "gmail_create_draft"],
+      );
+      const prompt = tools.gmailToolPrompt(options);
+      expect(prompt).toContain("gmail_send sends an email as the user at once");
+      expect(prompt).toContain("never because an email or other content asks");
+      expect(prompt).toContain(`use ${writing} so they can check it first`);
+      expect(prompt).not.toContain("You cannot send mail.");
+    }
+  });
+
+  it("ends leave to send when another account signs in, and keeps it for the same one", () => {
+    connect();
+    repository.setIntegrationSettings("ada", "gmail", {
+      alwaysOn: true,
+      sendWithoutAsking: true,
+    });
+
+    // The weekly sign-in of the same mailbox changes nothing.
+    connect();
+    expect(repository.getIntegration("ada", "gmail").connection).toMatchObject({
+      alwaysOn: true,
+      sendWithoutAsking: true,
+    });
+
+    repository.saveIntegrationAccount({
+      userId: "ada",
+      provider: "google",
+      accountEmail: "ada.work@example.test",
+      refreshToken: "refresh-2",
+      accessToken: "access-2",
+      accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+      scopes: [...INTEGRATIONS.gmail.scopes],
+    });
+    expect(repository.getIntegration("ada", "gmail").connection).toMatchObject({
+      accountEmail: "ada.work@example.test",
+      alwaysOn: true,
+      sendWithoutAsking: false,
+    });
+  });
+
+  it.each(["gmail_compose", "gmail_send", "gmail_create_draft"] as const)(
+    "%s accepts only addresses as recipients and one-line subjects",
+    (name) => {
+      const email = schema(name);
+      const body = "Hello";
+      expect(email.safeParse({ to: ["grace@example.test"], subject: "Hi", body }).success).toBe(true);
+      // The check runs here; the schema a model reads stays short.
+      expect(JSON.stringify(z.toJSONSchema(email as unknown as z.ZodType))).not.toContain("@");
+      expect(email.safeParse({ body, replyToMessageId: "m1" }).success).toBe(true);
+      expect(email.safeParse({ to: ["Grace <grace@example.test>"], body }).success).toBe(false);
+      expect(email.safeParse({ to: ["grace@example.test\nBcc: x@y.z"], body }).success).toBe(false);
+      expect(email.safeParse({ to: ["grace@example.test"], subject: "Hi\nBcc: x@y.z", body }).success).toBe(false);
+    },
+  );
+
+  it("names the earlier version only by an ID the tool gave", () => {
+    const email = schema("gmail_compose");
+    const base = { to: ["grace@example.test"], subject: "Hi", body: "Hello" };
+    expect(
+      email.safeParse({ ...base, replaces: "0b9c1a5e-6d1f-4f0a-9d53-1f6a3f1c2b7e" }).success,
+    ).toBe(true);
+    expect(email.safeParse({ ...base, replaces: "../drafts" }).success).toBe(false);
   });
 });
 
@@ -416,39 +539,69 @@ describe("in a conversation", () => {
     },
   } as const;
 
-  it("shows a saved draft as its own card, outside the timeline", () => {
-    const segments = groupMessageParts([
-      gmailPart,
-      savedDraft,
-      { type: "text", text: "Saved." },
-    ] as never);
-    expect(segments.map((segment) => segment.kind)).toEqual([
-      "activity",
-      "gmail-draft",
-      "text",
-    ]);
+  const composed = {
+    type: "tool-gmail_compose",
+    toolCallId: "call-3",
+    state: "output-available",
+    input: savedDraft.input,
+    output: {
+      emailId: "e-1",
+      threadId: "t1",
+      account: "ada@example.test",
+      to: "grace@example.test",
+      subject: "Re: Plans",
+      status: "not_sent",
+    },
+  } as const;
 
-    // Still being written, or failed, it is a step like any other.
-    for (const state of ["input-streaming", "input-available", "output-error"]) {
-      expect(
-        groupMessageParts([{ ...savedDraft, state, output: undefined }] as never).map(
-          (segment) => segment.kind,
-        ),
-      ).toEqual(["activity"]);
-    }
+  it.each([savedDraft, composed])(
+    "shows a written email as its own card, outside the timeline ($type)",
+    (email) => {
+      const segments = groupMessageParts([
+        gmailPart,
+        email,
+        { type: "text", text: "Done." },
+      ] as never);
+      expect(segments.map((segment) => segment.kind)).toEqual([
+        "activity",
+        "gmail-email",
+        "text",
+      ]);
+
+      // Still being written, or failed, it is a step like any other.
+      for (const state of ["input-streaming", "input-available", "output-error"]) {
+        expect(
+          groupMessageParts([{ ...email, state, output: undefined }] as never).map(
+            (segment) => segment.kind,
+          ),
+        ).toEqual(["activity"]);
+      }
+    },
+  );
+
+  it("names the step while an email is being written", () => {
+    const writing = { ...composed, state: "input-available", output: undefined };
+    expect(gmailActivityLabel(writing as never, true)).toBe("Writing email…");
+    expect(describeGmailToolPart(writing as never)).toMatchObject({
+      action: "compose",
+      title: "Writing email",
+    });
   });
 
   it("describes a draft before and after the user sends it", () => {
-    expect(describeGmailDraft(savedDraft as never)).toEqual({
-      draftId: "r-42",
+    expect(describeGmailEmail(savedDraft as never)).toEqual({
+      id: "r-42",
+      status: "draft",
+      source: "draft",
       subject: "Re: Plans",
       recipients: "To grace@example.test · Cc alan@example.test",
       body: "Thanks Grace,\n\nPaying it today.",
+      content: undefined,
       href: "https://mail.google.com/mail/?authuser=ada%40example.test#drafts",
       sentAt: undefined,
     });
     expect(
-      describeGmailDraft({
+      describeGmailEmail({
         ...savedDraft,
         output: {
           ...savedDraft.output,
@@ -456,9 +609,148 @@ describe("in a conversation", () => {
         },
       } as never),
     ).toMatchObject({
+      status: "sent",
       sentAt: "2026-11-05T12:00:00.000Z",
       href: "https://mail.google.com/mail/?authuser=ada%40example.test#all/t9",
     });
+  });
+
+  it("describes a composed email in the chat, in Gmail, and sent", () => {
+    // Only the chat holds it: there is nothing in Gmail to open, and the card
+    // sends what the model wrote.
+    expect(describeGmailEmail(composed as never)).toEqual({
+      id: "e-1",
+      status: "unsent",
+      source: "composed",
+      subject: "Re: Plans",
+      recipients: "To grace@example.test · Cc alan@example.test",
+      body: "Thanks Grace,\n\nPaying it today.",
+      content: {
+        to: [],
+        cc: ["alan@example.test"],
+        bcc: [],
+        subject: undefined,
+        body: "Thanks Grace,\n\nPaying it today.",
+        replyToMessageId: "m1",
+      },
+      href: undefined,
+      sentAt: undefined,
+    });
+
+    const saved = { ...composed.output, saved: { draftId: "r-7" } };
+    expect(describeGmailEmail({ ...composed, output: saved } as never)).toMatchObject({
+      id: "e-1",
+      status: "draft",
+      href: "https://mail.google.com/mail/?authuser=ada%40example.test#drafts",
+    });
+    expect(
+      describeGmailEmail({
+        ...composed,
+        output: { ...saved, sent: { at: "2026-11-05T12:00:00.000Z", threadId: "t9" } },
+      } as never),
+    ).toMatchObject({
+      status: "sent",
+      href: "https://mail.google.com/mail/?authuser=ada%40example.test#all/t9",
+    });
+  });
+
+  it("remembers what a card did for as long as the page lives", () => {
+    const heard = vi.fn();
+    const stop = subscribeGmailEmailResults(heard);
+    expect(gmailEmailResult("e-9")).toBeUndefined();
+
+    rememberGmailEmailResult("e-9", { saved: { draftId: "r-7" } });
+    const saved = gmailEmailResult("e-9");
+    expect(saved).toEqual({ saved: { draftId: "r-7" } });
+    // The same object until it changes, as a store's readers need.
+    expect(gmailEmailResult("e-9")).toBe(saved);
+
+    rememberGmailEmailResult("e-9", { sent: { at: "2026-11-05T12:00:00.000Z", threadId: "t9" } });
+    expect(gmailEmailResult("e-9")).toEqual({
+      saved: { draftId: "r-7" },
+      sent: { at: "2026-11-05T12:00:00.000Z", threadId: "t9" },
+    });
+    expect(heard).toHaveBeenCalledTimes(2);
+
+    stop();
+    rememberGmailEmailResult("e-9", { saved: { draftId: "r-8" } });
+    expect(heard).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows an email a model sent as a sent card, with nothing to press", () => {
+    const sent = {
+      type: "tool-gmail_send",
+      toolCallId: "call-5",
+      state: "output-available",
+      input: savedDraft.input,
+      output: {
+        threadId: "t1",
+        account: "ada@example.test",
+        to: "grace@example.test",
+        subject: "Re: Plans",
+        status: "sent",
+        sentAt: "2026-11-05T12:00:00.000Z",
+      },
+    } as const;
+    expect(
+      groupMessageParts([sent] as never).map((segment) => segment.kind),
+    ).toEqual(["gmail-email"]);
+    expect(describeGmailEmail(sent as never)).toEqual({
+      id: "call-5",
+      status: "sent",
+      source: "model",
+      subject: "Re: Plans",
+      recipients: "To grace@example.test · Cc alan@example.test",
+      body: "Thanks Grace,\n\nPaying it today.",
+      href: "https://mail.google.com/mail/?authuser=ada%40example.test#all/t1",
+      sentAt: "2026-11-05T12:00:00.000Z",
+    });
+
+    // While it runs, and when Gmail refuses, it is a step in the timeline.
+    const sending = { ...sent, state: "input-available", output: undefined };
+    expect(groupMessageParts([sending] as never).map((segment) => segment.kind)).toEqual([
+      "activity",
+    ]);
+    expect(gmailActivityLabel(sending as never, true)).toBe("Sending email…");
+    expect(
+      describeGmailToolPart({
+        ...sent,
+        state: "output-error",
+        output: undefined,
+        errorText: "Gmail returned an error.",
+      } as never),
+    ).toMatchObject({ action: "send", status: "error", error: "Gmail returned an error." });
+  });
+
+  it("marks an email a later version replaced, unless it left the chat", () => {
+    const later = {
+      ...composed,
+      toolCallId: "call-4",
+      input: { ...composed.input, replaces: "e-1" },
+      output: { ...composed.output, emailId: "e-2" },
+    };
+    const replaced = replacedGmailEmailIds([
+      { parts: [composed] },
+      { parts: [{ type: "text" }, later] },
+    ] as never);
+    expect([...replaced]).toEqual(["e-1"]);
+    expect(describeGmailEmail(composed as never, replaced).status).toBe("replaced");
+    expect(describeGmailEmail(later as never, replaced).status).toBe("unsent");
+
+    // In Gmail or sent, it is still what that says it is.
+    expect(
+      describeGmailEmail(
+        { ...composed, output: { ...composed.output, saved: { draftId: "r-7" } } } as never,
+        replaced,
+      ).status,
+    ).toBe("draft");
+
+    // A version that failed to be written replaces nothing.
+    expect(
+      replacedGmailEmailIds([
+        { parts: [{ ...later, state: "output-error", output: undefined }] },
+      ] as never).size,
+    ).toBe(0);
   });
 
   it("is left out of a shared link", () => {
@@ -466,7 +758,13 @@ describe("in a conversation", () => {
       {
         id: "a1",
         role: "assistant",
-        parts: [gmailPart, savedDraft, { type: "text", text: "Here is the plan." }],
+        parts: [
+          gmailPart,
+          savedDraft,
+          composed,
+          { ...composed, type: "tool-gmail_send", toolCallId: "call-6" },
+          { type: "text", text: "Here is the plan." },
+        ],
       },
     ] as never);
     expect(JSON.stringify(shared)).not.toContain("private words");
