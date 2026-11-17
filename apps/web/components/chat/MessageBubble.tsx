@@ -277,7 +277,7 @@ function AssistantBubble({
             if (seg.kind === "text") {
               const showCaret = streaming && isLast;
               return (
-                <div key={seg.index} data-chat-find-text="">
+                <div key={seg.index} data-chat-find-text="" data-i18n-skip>
                   <Streamdown
                     className="font-sans space-y-3 text-[15px] leading-relaxed"
                     plugins={MESSAGE_MARKDOWN_PLUGINS}
