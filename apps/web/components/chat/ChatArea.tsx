@@ -19,6 +19,7 @@ import {
   documentIdOf,
   findDocumentPart,
   followLiveDocuments,
+  hasScheduledTaskChange,
   hasSuccessfulMemoryMutation,
   isDocumentToolPart,
   modelSupportsChatReasoningLevel,
@@ -38,6 +39,7 @@ import {
   chatKeys,
   libraryKeys,
   personalizationKeys,
+  scheduledTaskKeys,
 } from "@/lib/queries/keys";
 import { usePublicCapabilities } from "@/lib/queries/capabilities";
 import type { IntegrationId } from "@/lib/integrations/schema";
@@ -49,6 +51,7 @@ import {
   useLoadOlderChatMessages,
   type ChatListItem,
 } from "@/lib/queries/chats";
+import { useChatReplyAlert } from "@/lib/notifications/useChatReplyAlert";
 import { useLocalStorage } from "@/lib/useLocalStorage";
 import { useSpeech } from "@/lib/useSpeech";
 import {
@@ -96,6 +99,7 @@ import {
 } from "@/lib/chat/composer-drafts";
 import { AdminOnboardingCard } from "@/components/AdminOnboardingCard";
 import { useSidebar } from "@/components/sidebar-context";
+import { AlertsIntro } from "@/components/AlertsIntro";
 import { toast } from "@/components/ui/toast";
 import { ChatFilesPanel } from "./ChatFiles";
 import { ChatHeader } from "./ChatHeader";
@@ -139,6 +143,8 @@ interface Props {
   initialModelId?: string | null;
   isNew?: boolean;
   projectId?: string | null;
+  /** The scheduled task whose run started this chat, when one did. */
+  scheduledTaskName?: string;
   initialQuery?: string;
   /** Called once when a new chat is first saved, so its URL can move to `/chat/:id`. */
   onPersisted?: () => void;
@@ -157,6 +163,7 @@ export function ChatArea({
   initialModelId,
   isNew,
   projectId,
+  scheduledTaskName,
   initialQuery,
   onPersisted,
   renderEmptyState,
@@ -309,6 +316,11 @@ export function ChatArea({
   useEffect(() => {
     temporaryRef.current = temporary;
   }, [temporary]);
+  const replyAlert = useChatReplyAlert(chatId);
+  const replyFinishedRef = useRef(replyAlert.replyFinished);
+  useEffect(() => {
+    replyFinishedRef.current = replyAlert.replyFinished;
+  }, [replyAlert.replyFinished]);
 
   const {
     messages,
@@ -355,7 +367,7 @@ export function ChatArea({
         void qc.invalidateQueries({ queryKey: libraryKeys.all() });
       }
     },
-    onFinish: ({ message, isError }) => {
+    onFinish: ({ message, isError, isAbort }) => {
       setMessages((current) =>
         current.filter(
           (m) =>
@@ -379,7 +391,13 @@ export function ChatArea({
       if (hasSuccessfulMemoryMutation(message)) {
         void qc.invalidateQueries({ queryKey: personalizationKeys.all() });
       }
+      if (hasScheduledTaskChange(message)) {
+        void qc.invalidateQueries({ queryKey: scheduledTaskKeys.all() });
+      }
       if (isError) return;
+      // Stats come with a generation that ran to its end. A reply stopped by
+      // hand has none, and neither has a summary the person asked for.
+      if (stats && !isAbort) replyFinishedRef.current(message.parts);
       setChatPersisted(true);
       void Promise.all([
         qc.invalidateQueries({ queryKey: chatKeys.list() }),
@@ -400,6 +418,8 @@ export function ChatArea({
       qc.invalidateQueries({ queryKey: chatKeys.active() }),
       qc.invalidateQueries({ queryKey: chatKeys.usage(chatId) }),
       qc.invalidateQueries({ queryKey: activityKeys.all() }),
+      // A reply that finished out of sight may have scheduled something.
+      qc.invalidateQueries({ queryKey: scheduledTaskKeys.all() }),
     ]);
   }, [chatId, qc]);
   const generation = useChatGenerationRecovery({
@@ -541,6 +561,7 @@ export function ChatArea({
     documentsSupported: true,
     codeExecutionSupported: true,
     gmailComposeSupported: true,
+    scheduledTasksSupported: true,
     forceOpenUI: openuiAvailable && forceOpenUI,
     gmailEnabled: connectorRequested("gmail"),
     calendarEnabled: connectorRequested("calendar"),
@@ -1008,6 +1029,7 @@ export function ChatArea({
           onToggle: () => setPanel((shown) => (shown ? null : { kind: "files" })),
         }}
         title={headerTitle}
+        scheduledTaskName={scheduledTaskName}
         project={
           project && !(renderEmptyState && showEmptyState)
             ? { id: project.id, name: project.name }
@@ -1089,6 +1111,11 @@ export function ChatArea({
                 ? (action) => handleSubmit(action.message, [], action)
                 : undefined
             }
+            onQuote={
+              voiceActive
+                ? undefined
+                : (text) => composerRef.current?.addQuote(text)
+            }
             onEdit={handleEdit}
             onReconnect={handleReconnect}
           />
@@ -1108,6 +1135,7 @@ export function ChatArea({
                   onPersisted={handleVoicePersisted}
                 />
               )}
+              {replyAlert.missed && !temporary && <AlertsIntro agents={isAdmin} />}
               {composer}
             </div>
           </div>

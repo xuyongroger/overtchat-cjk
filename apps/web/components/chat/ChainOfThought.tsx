@@ -10,7 +10,9 @@ import {
 import {
   BookOpen,
   Brain,
+  CalendarClock,
   ChevronDown,
+  ChevronRight,
   CircleAlert,
   Code2,
   FileSearch,
@@ -38,11 +40,14 @@ import {
   isCodeExecutionPart,
   isGmailToolPart,
   isReadFilePart,
+  isScheduledTaskToolPart,
   isSearchFilesPart,
   isToolSettled,
   isViewSkillToolPart,
   readFileRangeLabel,
   type ReadFilePart,
+  scheduledTaskActivityLabel,
+  type ScheduledTaskToolPart,
   type SearchFilesPart,
   viewSkillActivityLabel,
   type ViewSkillToolPart,
@@ -52,14 +57,21 @@ import {
   type WebSearchResult,
 } from "@overtchat/shared";
 import { parseMcpToolName } from "@overtchat/shared";
+import { agentThoughtPreview } from "@overtchat/shared/agent-presentation";
 import type { DynamicToolUIPart } from "ai";
 import { CodeRunFiles } from "./CodeExecutionFiles";
 import { CalendarLogo } from "@/components/CalendarLogo";
 import { GmailLogo } from "@/components/GmailLogo";
 import { CalendarStep } from "./CalendarStep";
 import { GmailStep } from "./GmailStep";
+import { ScheduledTaskStep } from "./ScheduledTaskStep";
 import { ThinkingContent } from "./ThinkingContent";
 import { serverUrl } from "@/lib/api-url";
+import { useLocalStorage } from "@/lib/useLocalStorage";
+import {
+  DEFAULT_EXPAND_ACTIVITY,
+  EXPAND_ACTIVITY_STORAGE_KEY,
+} from "@/lib/chat/activity-expansion";
 
 type ReasoningPart = { type: "reasoning"; text: string; state?: string };
 export type ActivityPart =
@@ -71,6 +83,7 @@ export type ActivityPart =
   | GmailToolPart
   | CalendarToolPart
   | ViewSkillToolPart
+  | ScheduledTaskToolPart
   | DynamicToolUIPart
   | ReasoningPart;
 
@@ -100,6 +113,7 @@ function isTool(
     isGmailToolPart(p) ||
     isCalendarToolPart(p) ||
     isViewSkillToolPart(p) ||
+    isScheduledTaskToolPart(p) ||
     isMcpTool(p)
   );
 }
@@ -108,8 +122,10 @@ function isTool(
  * One run of model "work" — interleaved reasoning + web tool calls — rendered
  * as a chain-of-thought timeline: a single live status line up top, then a
  * left-rail timeline where each part is its own typed step node, in order.
- * Adding a new activity kind (e.g. code execution) is one new step icon +
- * renderer; nothing else moves.
+ * When the run used tools, each reasoning step is a collapsed "Thought" row so
+ * the tool steps can be scanned without reading the thinking. Adding a new
+ * activity kind (e.g. code execution) is one new step icon + renderer;
+ * nothing else moves.
  */
 export function ChainOfThought({
   parts,
@@ -118,7 +134,13 @@ export function ChainOfThought({
   parts: ActivityPart[];
   active: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [expandByDefault] = useLocalStorage<boolean>(
+    EXPAND_ACTIVITY_STORAGE_KEY,
+    DEFAULT_EXPAND_ACTIVITY,
+  );
+  // A click wins; until then the device preference decides, live.
+  const [toggled, setToggled] = useState<boolean | null>(null);
+  const open = toggled ?? expandByDefault;
   const [duration, setDuration] = useState(0);
   const startedAtRef = useRef<number | null>(null);
   const settledRef = useRef(false);
@@ -145,6 +167,18 @@ export function ChainOfThought({
   }, [active]);
 
   const lastTool = [...parts].reverse().find(isTool);
+  // Reasoning stays inline when it is all the run did.
+  const collapseThoughts = lastTool !== undefined;
+  // Keyed by position in `parts`, so dropping an empty thought never shifts
+  // another step's open state onto its neighbour.
+  const steps = parts
+    .map((part, index) => ({ part, index }))
+    .filter(
+      ({ part }) =>
+        !isReasoning(part) ||
+        part.text.trim() !== "" ||
+        part.state === "streaming",
+    );
   const lastToolFailed = lastTool?.state === "output-error";
   const last = parts[parts.length - 1];
 
@@ -163,7 +197,9 @@ export function ChainOfThought({
                 ? CalendarLogo
                 : isViewSkillToolPart(lastTool)
                   ? BookOpen
-                  : Globe
+                  : isScheduledTaskToolPart(lastTool)
+                    ? CalendarClock
+                    : Globe
         : Brain;
   const label = active ? activeLabel(last) : settledLabel(parts, duration);
 
@@ -172,7 +208,7 @@ export function ChainOfThought({
       {/* Live status line — the only thing visible when collapsed. */}
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => setToggled(!open)}
         aria-expanded={open}
         className="group/cot flex w-full items-center gap-2 py-1 text-left text-muted-foreground motion-colors hover:text-foreground"
       >
@@ -205,8 +241,14 @@ export function ChainOfThought({
       >
         <div className="overflow-hidden">
           <div className="pt-1">
-            {parts.map((part, i) => (
-              <Step key={i} part={part} isLast={i === parts.length - 1} />
+            {steps.map(({ part, index }, i) => (
+              <Step
+                key={index}
+                part={part}
+                isLast={i === steps.length - 1}
+                collapseThoughts={collapseThoughts}
+                expandByDefault={expandByDefault}
+              />
             ))}
           </div>
         </div>
@@ -219,7 +261,17 @@ export function ChainOfThought({
 type StepIcon = ComponentType<{ className?: string }>;
 
 /** A single timeline node: left rail (icon + connector) + the step's content. */
-function Step({ part, isLast }: { part: ActivityPart; isLast: boolean }) {
+function Step({
+  part,
+  isLast,
+  collapseThoughts,
+  expandByDefault,
+}: {
+  part: ActivityPart;
+  isLast: boolean;
+  collapseThoughts: boolean;
+  expandByDefault: boolean;
+}) {
   const icon: StepIcon =
     isTool(part) && part.state === "output-error"
       ? CircleAlert
@@ -239,7 +291,9 @@ function Step({ part, isLast }: { part: ActivityPart; isLast: boolean }) {
                     ? CalendarLogo
                     : isViewSkillToolPart(part)
                       ? BookOpen
-                      : isMcpTool(part)
+                      : isScheduledTaskToolPart(part)
+                        ? CalendarClock
+                        : isMcpTool(part)
                         ? Wrench
                         : Brain;
 
@@ -263,12 +317,68 @@ function Step({ part, isLast }: { part: ActivityPart; isLast: boolean }) {
           <CalendarStep part={part} />
         ) : isViewSkillToolPart(part) ? (
           <SkillStep part={part} />
+        ) : isScheduledTaskToolPart(part) ? (
+          <ScheduledTaskStep part={part} />
         ) : isMcpTool(part) ? (
           <McpStep part={part} />
         ) : isReasoning(part) ? (
-          <ThinkingContent content={part.text} />
+          collapseThoughts ? (
+            <ThoughtStep part={part} expandByDefault={expandByDefault} />
+          ) : (
+            <ThinkingContent content={part.text} />
+          )
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** A reasoning step among tool steps: one line until opened. */
+function ThoughtStep({
+  part,
+  expandByDefault,
+}: {
+  part: ReasoningPart;
+  expandByDefault: boolean;
+}) {
+  const [toggled, setToggled] = useState<boolean | null>(null);
+  const open = toggled ?? expandByDefault;
+  const live = part.state === "streaming";
+  const preview = agentThoughtPreview(part.text);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setToggled(!open)}
+        aria-expanded={open}
+        className="group/thought flex w-full items-center gap-2 text-left text-muted-foreground motion-colors hover:text-foreground"
+      >
+        <span className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span
+            className={cn(
+              "shrink-0 font-medium text-foreground",
+              live && motionClasses.shimmer,
+            )}
+          >
+            {live ? "Thinking" : "Thought"}
+          </span>{" "}
+          {!open && preview && (
+            <span className="min-w-0 truncate">{preview}</span>
+          )}
+        </span>
+        <ChevronRight
+          className={cn(
+            "size-3 shrink-0 text-muted-foreground/60 motion-transform",
+            open && "rotate-90",
+          )}
+        />
+      </button>
+      {open && (
+        <div className="pt-1.5">
+          <ThinkingContent content={part.text} />
+        </div>
+      )}
     </div>
   );
 }
@@ -681,6 +791,9 @@ function activeLabel(last: ActivityPart | undefined): string {
   if (isGmailToolPart(last)) return gmailActivityLabel(last, true);
   if (isCalendarToolPart(last)) return calendarActivityLabel(last, true);
   if (isViewSkillToolPart(last)) return viewSkillActivityLabel(last, true);
+  if (isScheduledTaskToolPart(last)) {
+    return scheduledTaskActivityLabel(last, true);
+  }
   if (isMcpTool(last)) {
     const parsed = parseMcpToolName(last.toolName);
     return parsed
@@ -732,6 +845,9 @@ function settledLabel(parts: ActivityPart[], duration: number): string {
   }
   if (lastTool && isViewSkillToolPart(lastTool)) {
     return viewSkillActivityLabel(lastTool, false);
+  }
+  if (lastTool && isScheduledTaskToolPart(lastTool)) {
+    return scheduledTaskActivityLabel(lastTool, false);
   }
   if (lastTool && isMcpTool(lastTool)) {
     const parsed = parseMcpToolName(lastTool.toolName);
