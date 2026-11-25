@@ -240,6 +240,56 @@ describe("batch 3 tail (model editor deep + mcp editor + google dialogs + activi
   });
 });
 
+describe("batch 4 dictionary (upstream v0.36.0: scheduled tasks + replies + two-factor + sidebar)", () => {
+  it("translates scheduled task pages and dialogs", () => {
+    expect(translateTextContent("No scheduled tasks yet")).toBe("暂无定时任务");
+    expect(translateTextContent("Tasks run by themselves at the times you set. Each run opens a new chat.")).toBe(
+      "任务会在你设定的时间自动运行，每次运行都会新建一个对话。"
+    );
+    expect(translateTextContent("Delete task?")).toBe("删除任务？");
+    expect(translateTextContent("Run now")).toBe("立即运行");
+  });
+
+  it("translates quoted replies and two-factor prompts", () => {
+    expect(translateTextContent("Quoted text")).toBe("引用的文本");
+    expect(translateTextContent("Remove quote")).toBe("移除引用");
+    expect(translateTextContent("Protect your account")).toBe("保护你的账户");
+    expect(translateTextContent("You can always find this in Settings → Security.")).toBe(
+      "随时可以在「设置 → 安全」中找到。"
+    );
+  });
+
+  it("translates the renamed alerts strings (upstream dropped 'Agent alerts')", () => {
+    expect(translateTextContent("Alerts")).toBe("提醒");
+    expect(translateTextContent("A short chime when a reply is done.")).toBe("回复完成时播放简短提示音。");
+    expect(translateTextContent("Agent alerts")).toBe("Agent alerts");
+  });
+
+  it("translates sidebar refresh labels", () => {
+    expect(translateTextContent("New project")).toBe("新建项目");
+    expect(translateTextContent("Mark all as read")).toBe("全部标为已读");
+    expect(translateTextContent("Files from your saved chats. Reuse them with “Add from library” in any chat.")).toBe(
+      "来自已保存对话的文件。在任意对话中都可以通过「从库添加」复用它们。"
+    );
+  });
+});
+
+describe("batch 4 schedule summary patterns", () => {
+  it("translates fixed schedule forms before the generic weekday rule", () => {
+    expect(translateTextContent("Every day at 9:00 AM")).toBe("每天 9:00 AM");
+    expect(translateTextContent("Every hour at :05")).toBe("每小时第 05 分钟");
+    expect(translateTextContent("Weekdays at 8:00 AM")).toBe("工作日 8:00 AM");
+    expect(translateTextContent("Monthly on the 3rd at 10:00 AM")).toBe("每月 3 日 10:00 AM");
+    expect(translateTextContent("Once on Jan 5 at 9:00 AM")).toBe("仅一次：Jan 5 9:00 AM");
+  });
+
+  it("translates weekday-list schedules through the generic rule", () => {
+    expect(translateTextContent("Every Monday at 9:00 AM")).toBe("每周一 9:00 AM");
+    expect(translateTextContent("Every Monday and Friday at 9:00 AM")).toBe("每周一、周五 9:00 AM");
+    expect(translateTextContent("Every Monday, Wednesday and Friday at 9:00 AM")).toBe("每周一、周三、周五 9:00 AM");
+  });
+});
+
 describe("translateAttribute", () => {
   it("translates a supported attribute value", () => {
     expect(translateAttribute("placeholder", "Search")).toBe("搜索");

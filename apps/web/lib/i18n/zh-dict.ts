@@ -215,11 +215,14 @@ export const zhDict: Record<string, string> = {
 
   // Agent alerts (components/settings/general/AgentAlertsSection.tsx).
   // The two runtime "problem" notices are error details and stay English.
-  "Agent alerts": "智能体提醒",
+  "Alerts": "提醒",
   "When an agent needs you, finishes or fails. Only on this device, and only while OvertChat is open; otherwise your phone is told.":
     "当智能体需要你、完成或失败时提醒。仅在本设备且 OvertChat 打开时生效；否则会通知你的手机。",
   "Play a sound": "播放提示音",
-  "A short chime: rising when an agent needs you, falling when it is done.": "简短提示音：智能体需要你时上扬，完成时下降。",
+  "A short chime: rising when an agent needs you, falling when it or a reply is done.": "简短提示音：智能体需要你时上扬，它或回复完成时下降。",
+  "A short chime when a reply is done.": "回复完成时播放简短提示音。",
+  "When a chat reply is ready in the background, and when an agent needs you, finishes or fails. Only on this device, and only while OvertChat is open; otherwise your phone is told.": "当聊天回复在后台完成，以及智能体需要你、完成或失败时提醒。仅在本设备且 OvertChat 保持打开时生效；否则会通知手机端。",
+  "When a chat reply is ready in the background. Only on this device, and only while OvertChat is open.": "当聊天回复在后台完成时提醒。仅在本设备且 OvertChat 保持打开时生效。",
   "System notifications": "系统通知",
   "Shown while the window is in the background. In front, alerts appear in the corner instead.":
     "窗口在后台时显示；在前台时提醒改为出现在角落。",
@@ -735,6 +738,143 @@ export const zhDict: Record<string, string> = {
   Rank: "排名",
   Person: "成员",
   "Token activity": "Token 活动",
+
+  // Scheduled tasks (components/scheduled/*, packages/shared/scheduled-tasks.ts)
+  Scheduled: "定时任务",
+  "Scheduled tasks": "定时任务",
+  "Scheduled task": "定时任务",
+  "View tasks": "查看任务",
+  "New task": "新建任务",
+  "New scheduled task": "新建定时任务",
+  "Edit task": "编辑任务",
+  "No scheduled tasks yet": "暂无定时任务",
+  "Tasks run by themselves at the times you set. Each run opens a new chat.": "任务会在你设定的时间自动运行，每次运行都会新建一个对话。",
+  "The instructions run by themselves at the times you choose. Each run opens a new chat.": "指令会在你选择的时间自动运行，每次运行都会新建一个对话。",
+  Repeats: "重复频率",
+  Daily: "每天",
+  Weekly: "每周",
+  Monthly: "每月",
+  Hourly: "每小时",
+  Weekdays: "工作日",
+  Once: "仅一次",
+  None: "无",
+  Monday: "周一",
+  Tuesday: "周二",
+  Wednesday: "周三",
+  Thursday: "周四",
+  Friday: "周五",
+  Saturday: "周六",
+  Sunday: "周日",
+  Time: "时间",
+  "Choose a time.": "选择时间。",
+  "Day of the month": "每月的几号",
+  "Minute past the hour": "每小时的第几分钟",
+  "Time zone": "时区",
+  "Time zones": "时区",
+  "Search time zones": "搜索时区",
+  "No matching time zone.": "没有匹配的时区。",
+  "Choose a model": "选择模型",
+  "A month without this day is skipped.": "没有这一天的月份会自动跳过。",
+  "Each run starts fresh, so say everything it needs to know.": "每次运行都是全新的开始，请把需要知道的信息全部写清楚。",
+  "Runs start in the project, with its instructions and files.": "运行将在项目内开始，并带上项目的指令和文件。",
+  "Let runs search the web and read pages.": "允许运行联网搜索并读取网页。",
+  "Morning news briefing": "晨间新闻简报",
+  "Search for today's top technology news and summarize the five most important stories.": "搜索今日科技要闻，并总结五条最重要的新闻。",
+  "Delete task?": "删除任务？",
+  "Run now": "立即运行",
+  "This task has not run yet.": "该任务还没有运行记录。",
+  "Loading tasks…": "正在加载任务…",
+  "Loading runs…": "正在加载运行记录…",
+  Paused: "已暂停",
+  Failed: "失败",
+  Finished: "已完成",
+  Skipped: "已跳过",
+  Stopped: "已停止",
+  "Checking scheduled tasks…": "正在检查定时任务…",
+  "Scheduling a task…": "正在安排任务…",
+  "Scheduled a task": "已安排任务",
+  "Updating a scheduled task…": "正在更新定时任务…",
+  "Updated a scheduled task": "已更新定时任务",
+  "Deleting a scheduled task…": "正在删除定时任务…",
+  "Deleted a scheduled task": "已删除定时任务",
+
+  // Quoted replies and composer (components/chat/QuoteSelectionButton.tsx, Composer.tsx, MessageList.tsx, ChatArea.tsx, ChainOfThought.tsx)
+  Reply: "回复",
+  "Quoted text": "引用的文本",
+  "Remove quote": "移除引用",
+  "Load earlier messages": "加载更早的消息",
+  "Loading earlier messages": "正在加载更早的消息",
+  "Assistant is responding": "助手正在回复",
+  "Drop files to attach": "拖放文件即可添加附件",
+  "Images, PDFs, docs, spreadsheets, and text files": "支持图片、PDF、文档、表格和文本文件",
+  Thought: "思考",
+
+  // Two-factor prompt (components/TwoFactorPrompt.tsx, RequiredTwoFactorSetup.tsx, AccountForm sign-in section)
+  "Protect your account": "保护你的账户",
+  "Turn on two-factor authentication so a stolen password isn't enough to get in. Sign-in will also ask for a code from an authenticator app on your phone. It takes about a minute.": "开启两步验证后，即使密码被盗也无法登录。登录时还会要求输入手机验证器应用中的验证码，大约只需一分钟。",
+  "Set up two-factor": "设置两步验证",
+  "Set up two-factor authentication": "设置两步验证",
+  "This server requires administrators to sign in with a code from an authenticator app, as well as their password.": "本服务器要求管理员在密码之外，还要输入验证器应用中的验证码登录。",
+  "You can always find this in Settings → Security.": "随时可以在「设置 → 安全」中找到。",
+  "Not now": "暂不",
+  Dismiss: "忽略",
+  "Sign-in": "登录",
+
+  // Alerts intro (components/AlertsIntro.tsx)
+  "Enable notifications": "开启通知",
+  "Get notified when an agent needs you or a reply is ready.": "当智能体需要你或回复完成时接收通知。",
+  "Get notified when a reply is ready.": "回复完成时接收通知。",
+  "Your browser is blocking notifications for this site. Allow them there, then turn on Alerts in Settings.": "浏览器正在阻止本站的通知。请先在浏览器设置中允许通知，再到「设置」里开启「提醒」。",
+  "Shown while the window is in the background. In front, agent alerts appear in the corner instead.": "窗口处于后台时显示；窗口在前台时，智能体提醒会出现在角落。",
+  "Shown while the window is in the background.": "窗口处于后台时显示。",
+
+  // Sidebar refresh (components/SidebarClient.tsx, SidebarChatList.tsx, SidebarProjects.tsx, spa pages)
+  "New project": "新建项目",
+  "New agent": "新建智能体",
+  "Pinned chats": "置顶对话",
+  "Collapse sidebar": "收起侧边栏",
+  "Group by": "分组方式",
+  "Filter by agent": "按智能体筛选",
+  "Mark all as read": "全部标为已读",
+  "Refresh sessions": "刷新会话",
+  "Organize workspaces": "管理工作区",
+  "Loading workspaces…": "正在加载工作区…",
+  "Connect a folder to start an agent session.": "连接一个文件夹即可开始智能体会话。",
+  "Add workspace": "添加工作区",
+  "Add workspace…": "添加工作区…",
+  "No project": "无项目",
+  "Delete chat?": "删除对话？",
+  "Files used only in this chat will also be removed from your library.": "只在此对话中使用的文件也会从你的库中移除。",
+  "New result": "新结果",
+  "Give it a name. You can add instructions after creating it.": "先起个名字，创建之后可以再添加指令。",
+  "Start an agent in a folder": "在文件夹中启动智能体",
+  "Files from your saved chats. Reuse them with “Add from library” in any chat.": "来自已保存对话的文件。在任意对话中都可以通过「从库添加」复用它们。",
+
+  // Upstream v0.36.0 additions: settings toggles, model editor, users, misc
+  "Expand thinking and tools": "展开思考与工具步骤",
+  "Open each reply's thinking and tool steps without a click.": "无需点击即可展开每条回复的思考过程和工具步骤。",
+  "Request headers": "请求头",
+  "API format": "API 格式",
+  "Choose fetched model": "选择已获取的模型",
+  "Fetching available models": "正在获取可用模型",
+  "Add an API key to fetch models.": "添加 API 密钥后即可获取模型。",
+  "Enter manually": "手动输入",
+  "No matching models.": "没有匹配的模型。",
+  "Previously used:": "此前用过：",
+  "Save this model, then set each person's own key or endpoint under People.": "保存此模型后，再到「成员」中设置每人自己的密钥或端点。",
+  "No rates are needed for OpenRouter image models.": "OpenRouter 图像模型无需设置费率。",
+  "Add user": "添加用户",
+  "Current user": "当前用户",
+  "Reset password": "重置密码",
+  "Delete user?": "删除用户？",
+  "Opening terminal…": "正在打开终端…",
+  "Resize workspace files": "调整工作区文件面板大小",
+  "Resize workspace terminal": "调整工作区终端面板大小",
+  "Page not found": "页面不存在",
+  "Back to chats": "返回对话",
+  "OvertChat update command": "OvertChat 更新命令",
+  "View release notes": "查看更新说明",
+  "MCP documentation": "MCP 文档",
 };
 
 /** A replacement rule for text that embeds a variable, e.g. "5 messages". */
@@ -761,4 +901,25 @@ export const zhPatterns: ZhPattern[] = [
   { pattern: /^Number (\d+)$/, replace: "号码 $1" },
   { pattern: /^(\d+)% used$/, replace: "$1% 已用" },
   { pattern: /^Sign in once to connect (.+)$/, replace: "登录一次即可连接 $1" },
+  // Schedule summaries (packages/shared/scheduled-tasks.ts). Specific forms must
+  // precede the generic weekday-list rule; outputs are CJK-led so they never re-match.
+  { pattern: /^Every day at (.+)$/, replace: "每天 $1" },
+  { pattern: /^Every hour at :(\d{2})$/, replace: "每小时第 $1 分钟" },
+  { pattern: /^Weekdays at (.+)$/, replace: "工作日 $1" },
+  { pattern: /^Monthly on the (\d+)(?:st|nd|rd|th) at (.+)$/, replace: "每月 $1 日 $2" },
+  { pattern: /^Once on (.+) at (.+)$/, replace: "仅一次：$1 $2" },
+  {
+    pattern: /^Every (.+) at (.+)$/,
+    replace: (match) =>
+      `每${match[1]
+        .replace(/ and /g, "、")
+        .replace(/, /g, "、")
+        .replace(/Monday/g, "周一")
+        .replace(/Tuesday/g, "周二")
+        .replace(/Wednesday/g, "周三")
+        .replace(/Thursday/g, "周四")
+        .replace(/Friday/g, "周五")
+        .replace(/Saturday/g, "周六")
+        .replace(/Sunday/g, "周日")} ${match[2]}`,
+  },
 ];
