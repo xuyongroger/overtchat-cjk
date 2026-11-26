@@ -266,7 +266,7 @@ class SandboxTests(unittest.TestCase):
             "import glob, pytesseract\n"
             "from PIL import Image\n"
             "print(pytesseract.image_to_string(Image.open(glob.glob('tmp/page*.png')[0])))\n"
-            "import scipy, sklearn, seaborn, statsmodels, cv2\n",
+            "import scipy, sklearn, seaborn, statsmodels, cv2, sympy\n",
             timeout_seconds=180,
         )
         self.assertEqual(result["exit_code"], 0, result["stderr"])

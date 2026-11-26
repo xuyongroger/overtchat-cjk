@@ -28,6 +28,7 @@ Debian packages carry their full copyright and license texts under
 | Droid Sans Fallback font | slim, full | Apache-2.0 |
 | SciPy, scikit-learn, statsmodels | full | BSD-3-Clause |
 | seaborn | full | BSD-3-Clause |
+| SymPy, mpmath | full | BSD-3-Clause |
 | OpenCV (opencv-python-headless) | full | Apache-2.0 (bundled components under their own licenses) |
 | pytesseract, pdf2image | slim, full | Apache-2.0 / MIT |
 
