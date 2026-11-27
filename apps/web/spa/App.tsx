@@ -1,6 +1,7 @@
 import "@/lib/random-uuid-fallback";
 import { useEffect, useState } from "react";
 import { RouterProvider, type RouterHistory } from "@tanstack/react-router";
+import { I18nProvider } from "@/components/I18nProvider";
 import { QueryProvider } from "@/components/QueryProvider";
 import { ToastProvider } from "@/components/ui/toast";
 import { installStrayFileDropGuard } from "@/lib/chat/file-drop";
@@ -18,10 +19,12 @@ export function App({ history }: { history?: RouterHistory }) {
   // Built-in Chinese UI override: exact-match dictionary on DOM text/attributes.
   useEffect(() => installZhLocale(), []);
   return (
-    <QueryProvider>
-      <ToastProvider>
-        <RouterProvider router={router} />
-      </ToastProvider>
-    </QueryProvider>
+    <I18nProvider>
+      <QueryProvider>
+        <ToastProvider>
+          <RouterProvider router={router} />
+        </ToastProvider>
+      </QueryProvider>
+    </I18nProvider>
   );
 }

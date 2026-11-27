@@ -1,3 +1,5 @@
+import type { TFunction } from "i18next";
+
 /** Sign-in contract shared by the server and the web, desktop, and mobile clients. */
 
 /** Better Auth provider ID of the server's OpenID Connect identity provider. */
@@ -123,24 +125,28 @@ export function signInCancelled(code: string): boolean {
  * Why signing in with the identity provider failed, from the `error` code the
  * server puts on the redirect back to the login screen or app.
  */
-export function ssoErrorMessage(code: string, providerName: string): string {
+export function ssoErrorMessage(
+  code: string,
+  providerName: string,
+  t: TFunction,
+): string {
   switch (code) {
     case "signup_disabled":
-      return `Your ${providerName} account doesn't have an OvertChat account on this server. Ask your administrator to add you.`;
+      return t("auth.sso.errors.signupDisabled", { provider: providerName });
     case "account_not_linked":
     case "unable_to_link_account":
-      return `Your ${providerName} account couldn't be matched to your OvertChat account. Ask your administrator for help.`;
+      return t("auth.sso.errors.accountNotLinked", { provider: providerName });
     case "email_not_found":
     case "email_is_missing":
-      return `${providerName} didn't share your email address, so OvertChat can't tell who you are. Ask your administrator to check its setup.`;
+      return t("auth.sso.errors.emailMissing", { provider: providerName });
     case "banned":
     case "BANNED_USER":
-      return "Your account on this server is disabled. Ask your administrator for help.";
+      return t("auth.sso.errors.banned");
     case "access_denied":
-      return "Sign-in was cancelled.";
+      return t("auth.sso.errors.cancelled");
     case "expired":
-      return "That sign-in took too long. Try again.";
+      return t("auth.sso.errors.expired");
     default:
-      return `Couldn't sign in with ${providerName}. Try again, and ask your administrator if it keeps happening.`;
+      return t("auth.sso.errors.generic", { provider: providerName });
   }
 }

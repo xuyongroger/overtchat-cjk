@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   emptyTaskDraft,
   SCHEDULED_TASK_NAME_LIMIT,
@@ -13,6 +14,7 @@ import {
 import { router, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import { Alert, Pressable, Text, View } from "react-native";
+import { useFormatLocale } from "@/components/I18nProvider";
 import {
   Action,
   Choice,
@@ -43,28 +45,27 @@ import {
 import { useTheme } from "@/lib/theme";
 import { toastSuccess } from "@/lib/toast";
 
-const FREQUENCIES: { value: TaskScheduleFrequency; label: string }[] =
-  TASK_SCHEDULE_FREQUENCIES.map((value) => ({
-    value,
-    label: {
-      once: "Once",
-      hourly: "Hourly",
-      daily: "Daily",
-      weekdays: "Weekdays",
-      weekly: "Weekly",
-      monthly: "Monthly",
-    }[value],
-  }));
+const FREQUENCY_KEYS: Record<
+  TaskScheduleFrequency,
+  `scheduled.frequency.${TaskScheduleFrequency}`
+> = {
+  once: "scheduled.frequency.once",
+  hourly: "scheduled.frequency.hourly",
+  daily: "scheduled.frequency.daily",
+  weekdays: "scheduled.frequency.weekdays",
+  weekly: "scheduled.frequency.weekly",
+  monthly: "scheduled.frequency.monthly",
+};
 
 const DAYS = [
-  { short: "S", name: "Sunday" },
-  { short: "M", name: "Monday" },
-  { short: "T", name: "Tuesday" },
-  { short: "W", name: "Wednesday" },
-  { short: "T", name: "Thursday" },
-  { short: "F", name: "Friday" },
-  { short: "S", name: "Saturday" },
-];
+  { shortKey: "scheduled.daysShort.sunday", nameKey: "scheduled.days.sunday" },
+  { shortKey: "scheduled.daysShort.monday", nameKey: "scheduled.days.monday" },
+  { shortKey: "scheduled.daysShort.tuesday", nameKey: "scheduled.days.tuesday" },
+  { shortKey: "scheduled.daysShort.wednesday", nameKey: "scheduled.days.wednesday" },
+  { shortKey: "scheduled.daysShort.thursday", nameKey: "scheduled.days.thursday" },
+  { shortKey: "scheduled.daysShort.friday", nameKey: "scheduled.days.friday" },
+  { shortKey: "scheduled.daysShort.saturday", nameKey: "scheduled.days.saturday" },
+] as const;
 
 /** The picker's value for a task outside any project. */
 const NO_PROJECT = "none";
@@ -74,6 +75,7 @@ function deviceTimeZone(): string {
 }
 
 export default function ScheduledTaskScreen() {
+  const { t } = useTranslation();
   const { id } = useLocalSearchParams<{ id: string }>();
   const tasks = useScheduledTasks();
   const models = useModelConfigs();
@@ -81,7 +83,7 @@ export default function ScheduledTaskScreen() {
     return models.data ? (
       <TaskForm key="new" task={null} />
     ) : (
-      <SettingsPage title="New task">
+      <SettingsPage title={t("scheduled.actions.newTask")}>
         <QueryState query={models} />
       </SettingsPage>
     );
@@ -90,15 +92,17 @@ export default function ScheduledTaskScreen() {
   return task && models.data ? (
     <TaskForm key={task.id} task={task} />
   ) : (
-    <SettingsPage title="Edit task">
+    <SettingsPage title={t("scheduled.form.editTitle")}>
       <QueryState query={tasks.data ? models : tasks} />
-      {tasks.data && !task && <Label>This task no longer exists.</Label>}
+      {tasks.data && !task && <Label>{t("scheduled.mobile.notFound")}</Label>}
     </SettingsPage>
   );
 }
 
 function TaskForm({ task }: { task: ScheduledTask | null }) {
   const { colors, fonts } = useTheme();
+  const { t } = useTranslation();
+  const locale = useFormatLocale();
   const { data: models = [] } = useModelConfigs();
   const { data: projects = [] } = useProjects();
   const createTask = useCreateScheduledTask();
@@ -127,10 +131,10 @@ function TaskForm({ task }: { task: ScheduledTask | null }) {
   const modelKnown = modelOptions.some((option) => option.value === draft.modelConfigId);
 
   function save() {
-    const found = taskDraftProblem(draft);
+    const found = taskDraftProblem(draft, t);
     const schedule = scheduleOfDraft(draft);
     if (found || !schedule) {
-      setProblem(found ?? "Choose a time.");
+      setProblem(found ?? t("scheduled.validation.missingTime"));
       return;
     }
     const input = {
@@ -147,28 +151,31 @@ function TaskForm({ task }: { task: ScheduledTask | null }) {
       else await createTask.mutateAsync(input);
       setSaved(JSON.stringify(draft));
       setCreated(!task);
-      toastSuccess(task ? "Task updated" : "Task scheduled", input.name);
+      toastSuccess(
+        task ? t("scheduled.toast.updatedTitle") : t("scheduled.toast.createdTitle"),
+        input.name,
+      );
     });
   }
 
   return (
-    <SettingsPage title={task ? "Edit task" : "New task"}>
-      <Section description="Each run starts fresh, so say everything it needs to know.">
+    <SettingsPage title={task ? t("scheduled.form.editTitle") : t("scheduled.actions.newTask")}>
+      <Section description={t("scheduled.form.instructionsHint")}>
         <Field
-          label="Name"
+          label={t("scheduled.form.name")}
           value={draft.name}
           maxLength={SCHEDULED_TASK_NAME_LIMIT}
           onChangeText={(name) => change({ name })}
-          placeholder="Morning news briefing"
+          placeholder={t("scheduled.form.namePlaceholder")}
           autoCapitalize="sentences"
           autoCorrect
         />
         <Field
-          label="Instructions"
+          label={t("scheduled.form.instructions")}
           value={draft.prompt}
           maxLength={SCHEDULED_TASK_PROMPT_LIMIT}
           onChangeText={(prompt) => change({ prompt })}
-          placeholder="Search for today's top technology news and summarize the five most important stories."
+          placeholder={t("scheduled.form.instructionsPlaceholder")}
           multiline
           autoCapitalize="sentences"
           autoCorrect
@@ -176,53 +183,59 @@ function TaskForm({ task }: { task: ScheduledTask | null }) {
       </Section>
 
       <Section
-        title="When"
+        title={t("scheduled.mobile.whenSection")}
         description={
           draft.frequency === "monthly" && draft.dayOfMonth > 28
-            ? "A month without this day is skipped."
+            ? t("scheduled.form.dayOfMonthHint")
             : undefined
         }
       >
         <Choice
-          title="Repeats"
+          title={t("scheduled.form.repeats")}
           value={draft.frequency}
-          options={FREQUENCIES}
+          options={TASK_SCHEDULE_FREQUENCIES.map((value) => ({
+            value,
+            label: t(FREQUENCY_KEYS[value]),
+          }))}
           onChange={(frequency) => change({ frequency })}
         />
         {draft.frequency === "hourly" ? (
           <Choice
-            title="Minute past the hour"
+            title={t("scheduled.form.minutePastHour")}
+            searchLabel={t("scheduled.mobile.searchMinutePastHour")}
             value={String(draft.minute).padStart(2, "0")}
             options={minuteOptions(draft.minute)}
             onChange={(minute) => change({ minute: Number(minute) })}
           />
         ) : (
           <Choice
-            title="Time"
+            title={t("scheduled.form.time")}
+            searchLabel={t("scheduled.mobile.searchTime")}
             value={draft.time}
-            options={timeOptions(draft.time)}
+            options={timeOptions(draft.time, locale)}
             onChange={(time) => change({ time })}
           />
         )}
         {draft.frequency === "once" && (
           <Choice
-            title="Date"
+            title={t("scheduled.form.date")}
+            searchLabel={t("scheduled.mobile.searchDate")}
             value={draft.date}
-            options={dateOptions(draft.date)}
+            options={dateOptions(draft.date, locale)}
             onChange={(date) => change({ date })}
           />
         )}
         {draft.frequency === "weekly" && (
           <View style={{ padding: 14, gap: 10 }}>
-            <Label>On</Label>
+            <Label>{t("scheduled.form.daysOfWeek")}</Label>
             <View style={{ flexDirection: "row", gap: 6 }}>
               {DAYS.map((day, index) => {
                 const chosen = draft.daysOfWeek.includes(index);
                 return (
                   <Pressable
-                    key={day.name}
+                    key={day.nameKey}
                     accessibilityRole="checkbox"
-                    accessibilityLabel={day.name}
+                    accessibilityLabel={t(day.nameKey)}
                     accessibilityState={{ checked: chosen }}
                     onPress={() =>
                       change({
@@ -250,7 +263,7 @@ function TaskForm({ task }: { task: ScheduledTask | null }) {
                         fontSize: 14,
                       }}
                     >
-                      {day.short}
+                      {t(day.shortKey)}
                     </Text>
                   </Pressable>
                 );
@@ -260,19 +273,22 @@ function TaskForm({ task }: { task: ScheduledTask | null }) {
         )}
         {draft.frequency === "monthly" && (
           <Choice
-            title="Day of the month"
+            title={t("scheduled.form.dayOfMonth")}
+            searchLabel={t("scheduled.mobile.searchDayOfMonth")}
             value={String(draft.dayOfMonth).padStart(2, "0")}
             options={dayOfMonthOptions()}
             onChange={(day) => change({ dayOfMonth: Number(day) })}
           />
         )}
         <Row
-          title="Time zone"
+          title={t("scheduled.form.timeZone")}
           value={draft.timeZone.replaceAll("_", " ")}
           detail={
             draft.timeZone === ownZone
               ? undefined
-              : `Tap to use this phone's time zone, ${ownZone.replaceAll("_", " ")}.`
+              : t("scheduled.mobile.usePhoneTimeZone", {
+                  timeZone: ownZone.replaceAll("_", " "),
+                })
           }
           onPress={
             draft.timeZone === ownZone ? undefined : () => change({ timeZone: ownZone })
@@ -280,24 +296,26 @@ function TaskForm({ task }: { task: ScheduledTask | null }) {
         />
       </Section>
 
-      <Section title="Runs with">
+      <Section title={t("scheduled.mobile.runsWithSection")}>
         <Choice
-          title="Model"
+          title={t("scheduled.form.model")}
+          searchLabel={t("scheduled.mobile.searchModel")}
           value={modelKnown ? draft.modelConfigId : ""}
           options={
             modelKnown
               ? modelOptions
-              : [{ value: "", label: "Choose a model" }, ...modelOptions]
+              : [{ value: "", label: t("scheduled.form.chooseModel") }, ...modelOptions]
           }
           onChange={(modelConfigId) => change({ modelConfigId })}
         />
         {(projects.length > 0 || draft.projectId) && (
           <Choice
-            title="Project"
-            detail="Runs start in the project, with its instructions and files."
+            title={t("scheduled.form.project")}
+            searchLabel={t("scheduled.mobile.searchProject")}
+            detail={t("scheduled.form.projectHint")}
             value={draft.projectId ?? NO_PROJECT}
             options={[
-              { value: NO_PROJECT, label: "None" },
+              { value: NO_PROJECT, label: t("scheduled.form.noProject") },
               ...projects.map((project) => ({
                 value: project.id,
                 label: project.name,
@@ -309,8 +327,8 @@ function TaskForm({ task }: { task: ScheduledTask | null }) {
           />
         )}
         <Toggle
-          title="Web search"
-          detail="Let runs search the web and read pages."
+          title={t("scheduled.form.webSearch")}
+          detail={t("scheduled.form.webSearchHint")}
           value={draft.webSearchEnabled}
           onChange={(webSearchEnabled) => change({ webSearchEnabled })}
         />
@@ -319,32 +337,38 @@ function TaskForm({ task }: { task: ScheduledTask | null }) {
       {!!(problem || action.error) && <Label error>{problem || action.error}</Label>}
       <Action
         title={
-          created ? "Task scheduled" : action.busy ? "Saving…" : task ? "Save" : "Schedule"
+          created
+            ? t("scheduled.toast.createdTitle")
+            : action.busy
+              ? t("common.states.saving")
+              : task
+                ? t("common.actions.save")
+                : t("scheduled.form.schedule")
         }
         disabled={action.busy || created}
         onPress={save}
       />
       {created && (
-        <Action secondary title="Back to tasks" onPress={() => router.back()} />
+        <Action secondary title={t("scheduled.mobile.backToTasks")} onPress={() => router.back()} />
       )}
       {task && (
         <Action
-          title="Delete task"
+          title={t("scheduled.mobile.deleteTask")}
           destructive
           disabled={action.busy || changed}
           onPress={() =>
             Alert.alert(
-              "Delete task?",
-              `${task.name} will stop running. The chats it wrote are kept.`,
+              t("scheduled.deleteDialog.title"),
+              t("scheduled.mobile.deleteDialogMessage", { name: task.name }),
               [
-                { text: "Cancel", style: "cancel" },
+                { text: t("common.actions.cancel"), style: "cancel" },
                 {
-                  text: "Delete",
+                  text: t("common.actions.delete"),
                   style: "destructive",
                   onPress: () =>
                     void action.run(async () => {
                       await deleteTask.mutateAsync(task.id);
-                      toastSuccess("Task deleted", task.name);
+                      toastSuccess(t("scheduled.toast.deletedTitle"), task.name);
                       router.back();
                     }),
                 },

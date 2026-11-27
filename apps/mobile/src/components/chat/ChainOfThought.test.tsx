@@ -2,6 +2,8 @@ import React, { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { I18nextProvider } from "react-i18next";
+import { i18n } from "@overtchat/shared/i18n";
 import {
   groupMessageParts,
   type CalendarToolPart,
@@ -15,6 +17,15 @@ vi.mock("@expo/vector-icons", () => ({
   Feather: () => null,
   Ionicons: ({ name }: { name: string }) => <i data-icon={name} />,
   MaterialCommunityIcons: ({ name }: { name: string }) => <i data-icon={name} />,
+}));
+vi.mock("expo-localization", () => ({
+  getLocales: () => [{ languageTag: "en-US" }],
+  useLocales: () => [{ languageTag: "en-US" }],
+}));
+vi.mock("expo-secure-store", () => ({
+  getItem: () => null,
+  setItem: () => {},
+  deleteItemAsync: async () => {},
 }));
 vi.mock("@shopify/flash-list", () => ({ useLayoutState: useState }));
 vi.mock("../GmailLogo", () => ({ GmailLogo: () => <i data-icon="gmail" /> }));
@@ -109,7 +120,11 @@ beforeEach(() => {
     vi.stubGlobal(key, value);
   }
   container = window.document.getElementById("root") as unknown as HTMLElement;
-  root = createRoot(container);
+  const reactRoot = createRoot(container);
+  root = {
+    render: (node) => reactRoot.render(<I18nextProvider i18n={i18n}>{node}</I18nextProvider>),
+    unmount: () => reactRoot.unmount(),
+  };
 });
 
 afterEach(async () => {

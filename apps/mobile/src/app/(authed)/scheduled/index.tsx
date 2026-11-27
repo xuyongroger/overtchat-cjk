@@ -1,8 +1,9 @@
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   describeTaskSchedule,
   formatScheduledRunTime,
   formatUpdatedAt,
-  SCHEDULED_TASK_RUN_LABELS,
   scheduledTaskIsCompleted,
   type ScheduledTask,
   type ScheduledTaskRun,
@@ -10,6 +11,7 @@ import {
 import { router } from "expo-router";
 import { useState } from "react";
 import { Switch, View } from "react-native";
+import { useFormatLocale } from "@/components/I18nProvider";
 import {
   Label,
   QueryState,
@@ -32,19 +34,27 @@ import { useTheme } from "@/lib/theme";
 import { toastSuccess } from "@/lib/toast";
 
 /** What a task is waiting for: its next time, or why it has none. */
-function taskStatus(task: ScheduledTask): string {
+function taskStatus(task: ScheduledTask, t: TFunction, locale: string): string {
   if (task.enabled && task.nextRunAt) {
-    return `Next run ${formatScheduledRunTime(task.nextRunAt, task.timeZone)}`;
+    return t("scheduled.status.nextRun", {
+      time: formatScheduledRunTime(task.nextRunAt, task.timeZone, locale),
+    });
   }
   if (task.pausedReason) return task.pausedReason;
-  return scheduledTaskIsCompleted(task) ? "Completed" : "Paused";
+  return scheduledTaskIsCompleted(task)
+    ? t("scheduled.status.completed")
+    : t("scheduled.status.paused");
 }
 
-function runDetail(run: ScheduledTaskRun): string {
+function runDetail(run: ScheduledTaskRun, t: TFunction): string {
+  const status = t(`scheduled.runs.status.${run.status}`);
   return [
-    SCHEDULED_TASK_RUN_LABELS[run.status],
-    run.trigger === "manual" ? "Run by hand" : null,
-    run.chatId && !run.seen && run.status !== "running" ? "New" : null,
+    run.trigger === "manual"
+      ? t("scheduled.runs.statusManual", { status })
+      : status,
+    run.chatId && !run.seen && run.status !== "running"
+      ? t("scheduled.runs.new")
+      : null,
     run.error,
   ]
     .filter(Boolean)
@@ -52,29 +62,30 @@ function runDetail(run: ScheduledTaskRun): string {
 }
 
 export default function Scheduled() {
+  const { t } = useTranslation();
   const tasks = useScheduledTasks();
   useRefreshOnFocus(tasks.refetch);
   const { data: models } = useModelConfigs();
   const { data: projects } = useProjects();
   return (
     <SettingsPage
-      title="Scheduled"
+      title={t("scheduled.page.title")}
       action={{
-        label: "New task",
+        label: t("scheduled.actions.newTask"),
         icon: "add",
         onPress: () =>
           router.push({ pathname: "/scheduled/[id]", params: { id: "new" } }),
       }}
     >
       <Label muted>
-        Tasks run by themselves at the times you set. Each run opens a new chat.
+        {t("scheduled.page.description")}
       </Label>
       <QueryState query={tasks} />
       {tasks.data?.tasks.length === 0 && (
         <Section>
           <Row
-            title="No scheduled tasks yet"
-            detail="Add one here, or ask in any chat: “Every weekday at 8, send me a news briefing.”"
+            title={t("scheduled.empty.title")}
+            detail={t("scheduled.mobile.emptyDescription")}
           />
         </Section>
       )}
@@ -100,6 +111,8 @@ function TaskCard({
   project?: string;
 }) {
   const { colors } = useTheme();
+  const { t } = useTranslation();
+  const locale = useFormatLocale();
   const { openChat } = useChatSession();
   const updateTask = useUpdateScheduledTask();
   const runTask = useRunScheduledTask();
@@ -120,16 +133,21 @@ function TaskCard({
         <Row
           title={task.name}
           detail={[
-            describeTaskSchedule(task.schedule),
-            model ?? (task.modelConfigId === null ? "Model removed" : null),
+            describeTaskSchedule(task.schedule, t, locale),
+            model ??
+              (task.modelConfigId === null
+                ? t("scheduled.task.modelRemoved")
+                : null),
             project,
           ]
             .filter(Boolean)
             .join(" · ")}
-          status={<Label muted>{taskStatus(task)}</Label>}
+          status={<Label muted>{taskStatus(task, t, locale)}</Label>}
         >
           <Switch
-            accessibilityLabel={`Run ${task.name} on its schedule`}
+            accessibilityLabel={t("scheduled.mobile.runOnScheduleLabel", {
+              name: task.name,
+            })}
             value={task.enabled}
             disabled={action.busy}
             trackColor={{ true: colors.primary }}
@@ -153,8 +171,12 @@ function TaskCard({
             }
             title={
               lastRun.status === "running"
-                ? "Running now"
-                : `${SCHEDULED_TASK_RUN_LABELS[lastRun.status]} ${formatUpdatedAt(lastRun.startedAt).toLowerCase()}`
+                ? t("scheduled.runs.runningNow")
+                : t(`scheduled.runs.lastRun.${lastRun.status}`, {
+                    time: formatUpdatedAt(lastRun.startedAt, t, locale, undefined, {
+                      inline: true,
+                    }),
+                  })
             }
             detail={lastRun.error ?? undefined}
             navigation={!!lastRun.chatId}
@@ -163,18 +185,21 @@ function TaskCard({
         )}
         <Row
           icon="play-outline"
-          title="Run now"
+          title={t("scheduled.actions.runNow")}
           disabled={running || action.busy}
           onPress={() =>
             void action.run(async () => {
               await runTask.mutateAsync(task.id);
-              toastSuccess("Running now", `${task.name} will open a new chat when it finishes.`);
+              toastSuccess(
+                t("scheduled.toast.runningTitle"),
+                t("scheduled.toast.runningDescription", { name: task.name }),
+              );
             })
           }
         />
         <Row
           icon="create-outline"
-          title="Edit"
+          title={t("common.actions.edit")}
           navigation
           onPress={() =>
             router.push({ pathname: "/scheduled/[id]", params: { id: task.id } })
@@ -182,27 +207,33 @@ function TaskCard({
         />
         <Row
           icon="time-outline"
-          title="Runs"
+          title={t("scheduled.runs.toggle")}
           expanded={historyOpen}
           onPress={() => setHistoryOpen((open) => !open)}
         />
         {historyOpen &&
           (runs.data ? (
             runs.data.length === 0 ? (
-              <Row title="This task has not run yet." />
+              <Row title={t("scheduled.runs.empty")} />
             ) : (
               runs.data.map((run) => (
                 <Row
                   key={run.id}
-                  title={formatScheduledRunTime(run.startedAt, task.timeZone)}
-                  detail={runDetail(run)}
+                  title={formatScheduledRunTime(run.startedAt, task.timeZone, locale)}
+                  detail={runDetail(run, t)}
                   navigation={!!run.chatId}
                   onPress={run.chatId ? () => open(run.chatId as string) : undefined}
                 />
               ))
             )
           ) : (
-            <Row title={runs.error ? "Could not load the runs." : "Loading runs…"} />
+            <Row
+              title={
+                runs.error
+                  ? t("scheduled.runs.loadError")
+                  : t("scheduled.runs.loading")
+              }
+            />
           ))}
       </Section>
       {!!action.error && <Label error>{action.error}</Label>}

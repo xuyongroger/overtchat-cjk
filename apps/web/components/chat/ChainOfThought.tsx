@@ -7,6 +7,9 @@ import {
   useState,
   type ComponentType,
 } from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
+import { useFormatLocale } from "@/components/I18nProvider";
 import {
   BookOpen,
   Brain,
@@ -134,6 +137,7 @@ export function ChainOfThought({
   parts: ActivityPart[];
   active: boolean;
 }) {
+  const { t } = useTranslation();
   const [expandByDefault] = useLocalStorage<boolean>(
     EXPAND_ACTIVITY_STORAGE_KEY,
     DEFAULT_EXPAND_ACTIVITY,
@@ -201,7 +205,7 @@ export function ChainOfThought({
                     ? CalendarClock
                     : Globe
         : Brain;
-  const label = active ? activeLabel(last) : settledLabel(parts, duration);
+  const label = active ? activeLabel(last, t) : settledLabel(parts, duration, t);
 
   return (
     <div className="text-xs">
@@ -341,6 +345,7 @@ function ThoughtStep({
   part: ReasoningPart;
   expandByDefault: boolean;
 }) {
+  const { t } = useTranslation();
   const [toggled, setToggled] = useState<boolean | null>(null);
   const open = toggled ?? expandByDefault;
   const live = part.state === "streaming";
@@ -361,7 +366,7 @@ function ThoughtStep({
               live && motionClasses.shimmer,
             )}
           >
-            {live ? "Thinking" : "Thought"}
+            {live ? t("chat.activity.thinking") : t("chat.activity.thought")}
           </span>{" "}
           {!open && preview && (
             <span className="min-w-0 truncate">{preview}</span>
@@ -385,11 +390,12 @@ function ThoughtStep({
 
 /** A model reading a skill's instructions before using it. */
 function SkillStep({ part }: { part: ViewSkillToolPart }) {
+  const { t } = useTranslation();
   const settled = isToolSettled(part);
   return (
     <div className="space-y-1.5">
       <span className="block font-medium text-foreground">
-        {viewSkillActivityLabel(part, !settled)}
+        {viewSkillActivityLabel(part, !settled, t)}
       </span>
       {part.state === "output-error" && (
         <p className="text-destructive">{part.errorText}</p>
@@ -403,6 +409,7 @@ function SkillStep({ part }: { part: ViewSkillToolPart }) {
 }
 
 function McpStep({ part }: { part: DynamicToolUIPart }) {
+  const { t } = useTranslation();
   const parsed = parseMcpToolName(part.toolName);
   const title = part.title ?? parsed?.toolName ?? part.toolName;
   const server = parsed?.serverName ?? "MCP";
@@ -417,16 +424,20 @@ function McpStep({ part }: { part: DynamicToolUIPart }) {
           {server} · {title}
         </span>
         <span className="shrink-0 text-muted-foreground">
-          {running ? "Running" : part.state === "output-error" ? "Failed" : "Done"}
+          {running
+            ? t("chat.activity.running")
+            : part.state === "output-error"
+              ? t("chat.activity.failed")
+              : t("chat.activity.done")}
         </span>
       </div>
       {part.state === "output-error" ? (
         <p className="text-destructive">{part.errorText}</p>
       ) : (
-        <ToolValue label="Input" value={part.input} />
+        <ToolValue label={t("chat.activity.input")} value={part.input} />
       )}
       {part.state === "output-available" && (
-        <ToolValue label="Output" value={part.output} />
+        <ToolValue label={t("chat.activity.output")} value={part.output} />
       )}
     </div>
   );
@@ -475,9 +486,10 @@ function Rail({ icon: Icon, isLast }: { icon: StepIcon; isLast: boolean }) {
 }
 
 function SearchStep({ part }: { part: WebSearchPart }) {
+  const { t } = useTranslation();
   const query = part.input?.query?.trim();
   const results = webSearchResults(part.output);
-  const provider = webSearchProviderLabel(part.output);
+  const provider = webSearchProviderLabel(part.output, t);
   const hasAnswer =
     part.output !== undefined &&
     !Array.isArray(part.output) &&
@@ -487,15 +499,15 @@ function SearchStep({ part }: { part: WebSearchPart }) {
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-3">
         <span className="min-w-0 truncate font-medium text-foreground">
-          {query || "Searching…"}
+          {query || t("common.states.searching")}
         </span>
         {part.state === "output-available" && (
           <span className="shrink-0 text-muted-foreground">
             {results.length > 0
-              ? `${results.length} ${results.length === 1 ? "result" : "results"}`
+              ? t("chat.activity.results", { count: results.length })
               : hasAnswer
-                ? "answer"
-                : "no results"}
+                ? t("chat.activity.answer")
+                : t("chat.activity.noResults")}
             {provider ? ` · ${provider}` : ""}
           </span>
         )}
@@ -535,6 +547,8 @@ function ResultRow({ result }: { result: WebSearchResult }) {
 }
 
 function FetchStep({ part }: { part: FetchUrlPart }) {
+  const { t } = useTranslation();
+  const locale = useFormatLocale();
   const url = part.input?.url;
   const domain = url ? cleanDomain(url) : "";
   const running = !isToolSettled(part);
@@ -544,7 +558,9 @@ function FetchStep({ part }: { part: FetchUrlPart }) {
     return (
       <div className="space-y-1.5">
         <div className="font-medium text-foreground">
-          Read {domain || "page"}
+          {domain
+            ? t("chat.activity.readDomain", { domain })
+            : t("chat.activity.readPage")}
         </div>
         <p className="text-destructive">{part.errorText}</p>
       </div>
@@ -574,7 +590,9 @@ function FetchStep({ part }: { part: FetchUrlPart }) {
             {cleanDomain(page.url)}
           </span>
         </span>
-        <span className="shrink-0 text-muted-foreground">Image</span>
+        <span className="shrink-0 text-muted-foreground">
+          {t("chat.activity.image")}
+        </span>
       </a>
     );
   }
@@ -592,11 +610,13 @@ function FetchStep({ part }: { part: FetchUrlPart }) {
         <Favicon domain={domain} className="size-4 shrink-0 rounded-sm" />
       )}
       <span className="min-w-0 flex-1 truncate text-foreground">
-        {page?.title ?? (running ? "Reading…" : domain)}
+        {page?.title ?? (running ? t("chat.activity.readingEllipsis") : domain)}
       </span>
       {page && (
         <span className="shrink-0 text-muted-foreground">
-          {page.wordCount.toLocaleString()} words
+          {t("chat.activity.wordCount", {
+            count: page.wordCount.toLocaleString(locale),
+          })}
         </span>
       )}
     </a>
@@ -604,8 +624,9 @@ function FetchStep({ part }: { part: FetchUrlPart }) {
 }
 
 function ReadFileStep({ part }: { part: ReadFilePart }) {
+  const { t } = useTranslation();
   const output = part.output;
-  const name = output?.file ?? part.input?.file ?? "file";
+  const name = output?.file ?? part.input?.file ?? t("chat.activity.fileFallback");
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-3">
@@ -614,10 +635,10 @@ function ReadFileStep({ part }: { part: ReadFilePart }) {
         </span>
         <span className="shrink-0 text-muted-foreground">
           {part.state === "output-error"
-            ? "Failed"
+            ? t("chat.activity.failed")
             : output
-              ? readFileRangeLabel(output)
-              : "Reading…"}
+              ? readFileRangeLabel(output, t)
+              : t("chat.activity.readingEllipsis")}
         </span>
       </div>
       {part.state === "output-error" && (
@@ -628,19 +649,24 @@ function ReadFileStep({ part }: { part: ReadFilePart }) {
 }
 
 function SearchFilesStep({ part }: { part: SearchFilesPart }) {
+  const { t } = useTranslation();
+  const locale = useFormatLocale();
   const query = part.input?.query?.trim();
   const output = part.output;
   return (
     <div className="space-y-1.5">
       <div className="flex items-baseline justify-between gap-3">
         <span className="min-w-0 truncate font-medium text-foreground">
-          {query || "Searching files…"}
+          {query || t("chat.activity.searchingFilesEllipsis")}
         </span>
         {output && (
           <span className="shrink-0 text-muted-foreground">
             {output.totalMatches === 0
-              ? "no matches"
-              : `${output.totalMatches.toLocaleString()} ${output.totalMatches === 1 ? "match" : "matches"}`}
+              ? t("chat.activity.noMatches")
+              : t("chat.activity.matches", {
+                  count: output.totalMatches,
+                  formattedCount: output.totalMatches.toLocaleString(locale),
+                })}
           </span>
         )}
       </div>
@@ -672,14 +698,16 @@ const STEP_CODE_BLOCK = [
 ].join(" ");
 
 function CodeStep({ part }: { part: CodeExecutionPart }) {
+  const { t } = useTranslation();
   const output = part.output;
   const code = part.input?.code ?? "";
   const files = codeExecutionFiles(part);
   return (
     <div className="space-y-1.5" data-code-run="">
       <div className="flex items-baseline justify-between gap-3">
+        {/* eslint-disable-next-line i18next/no-literal-string -- Programming language name */}
         <span className="font-medium text-foreground">Python</span>
-        <span className="shrink-0 text-muted-foreground">{codeRunStatus(part)}</span>
+        <span className="shrink-0 text-muted-foreground">{codeRunStatus(part, t)}</span>
       </div>
       {code && (
         <div className={cn("max-h-64 overflow-auto rounded-lg border bg-background/40 px-2.5 py-2", STEP_CODE_BLOCK)}>
@@ -690,10 +718,24 @@ function CodeStep({ part }: { part: CodeExecutionPart }) {
         <p className="text-destructive">{part.errorText}</p>
       )}
       {output?.stdout && (
-        <RunOutput label="Output" text={output.stdout} truncated={output.stdoutTruncated} />
+        <RunOutput
+          label={
+            output.stdoutTruncated
+              ? t("chat.activity.outputTruncated")
+              : t("chat.activity.output")
+          }
+          text={output.stdout}
+        />
       )}
       {output?.stderr && (
-        <RunOutput label="Errors" text={output.stderr} truncated={output.stderrTruncated} />
+        <RunOutput
+          label={
+            output.stderrTruncated
+              ? t("chat.activity.errorsTruncated")
+              : t("chat.activity.errors")
+          }
+          text={output.stderr}
+        />
       )}
       {files.length > 0 && <CodeRunFiles files={files} />}
     </div>
@@ -703,17 +745,14 @@ function CodeStep({ part }: { part: CodeExecutionPart }) {
 function RunOutput({
   label,
   text,
-  truncated,
 }: {
   label: string;
   text: string;
-  truncated?: boolean;
 }) {
   return (
     <div className="rounded-lg border bg-background/40 px-2.5 py-2">
       <p className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
         {label}
-        {truncated ? " (truncated)" : ""}
       </p>
       <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-4 text-foreground">
         {text}
@@ -769,94 +808,129 @@ function Favicon({
   );
 }
 
-function activeLabel(last: ActivityPart | undefined): string {
-  if (!last) return "Working…";
+function activeLabel(last: ActivityPart | undefined, t: TFunction): string {
+  if (!last) return t("common.states.working");
   if (last.type === "tool-web_search") {
     const query = last.input?.query?.trim();
-    return query ? `Searching "${query}"` : "Searching the web…";
+    return query
+      ? t("chat.activity.searchingQuery", { query })
+      : t("chat.activity.searchingWeb");
   }
   if (last.type === "tool-fetch_url") {
     const url = last.input?.url;
-    return url ? `Reading ${cleanDomain(url)}` : "Reading page…";
+    return url
+      ? t("chat.activity.readingDomain", { domain: cleanDomain(url) })
+      : t("chat.activity.readingPage");
   }
   if (isReadFilePart(last)) {
     const file = last.input?.file;
-    return file ? `Reading ${file}` : "Reading file…";
+    return file
+      ? t("chat.activity.readingNamedFile", { file })
+      : t("chat.activity.readingFile");
   }
   if (isSearchFilesPart(last)) {
     const query = last.input?.query?.trim();
-    return query ? `Searching files for "${query}"` : "Searching files…";
+    return query
+      ? t("chat.activity.searchingFilesQuery", { query })
+      : t("chat.activity.searchingFilesEllipsis");
   }
-  if (isCodeExecutionPart(last)) return "Running code…";
-  if (isGmailToolPart(last)) return gmailActivityLabel(last, true);
-  if (isCalendarToolPart(last)) return calendarActivityLabel(last, true);
-  if (isViewSkillToolPart(last)) return viewSkillActivityLabel(last, true);
+  if (isCodeExecutionPart(last)) return t("chat.activity.runningCode");
+  if (isGmailToolPart(last)) return gmailActivityLabel(last, true, t);
+  if (isCalendarToolPart(last)) return calendarActivityLabel(last, true, t);
+  if (isViewSkillToolPart(last)) return viewSkillActivityLabel(last, true, t);
   if (isScheduledTaskToolPart(last)) {
-    return scheduledTaskActivityLabel(last, true);
+    return scheduledTaskActivityLabel(last, true, t);
   }
   if (isMcpTool(last)) {
     const parsed = parseMcpToolName(last.toolName);
     return parsed
-      ? `Running ${parsed.serverName} · ${parsed.toolName}`
-      : "Running MCP tool…";
+      ? t("chat.activity.runningMcpServerTool", {
+          server: parsed.serverName,
+          tool: parsed.toolName,
+        })
+      : t("chat.activity.runningMcpTool");
   }
-  return "Thinking";
+  return t("chat.activity.thinking");
 }
 
-function settledLabel(parts: ActivityPart[], duration: number): string {
+function settledLabel(
+  parts: ActivityPart[],
+  duration: number,
+  t: TFunction,
+): string {
   const lastTool = [...parts].reverse().find(isTool);
   if (lastTool?.type === "tool-web_search") {
-    if (lastTool.state === "output-error") return "Web search failed";
-    if (lastTool.state === "output-available") return "Searched the web";
-    return "Web search did not complete";
+    if (lastTool.state === "output-error") return t("chat.activity.webSearchFailed");
+    if (lastTool.state === "output-available") return t("chat.activity.searchedWeb");
+    return t("chat.activity.webSearchIncomplete");
   }
   if (lastTool?.type === "tool-fetch_url") {
-    if (lastTool.state === "output-error") return "Page fetch failed";
+    if (lastTool.state === "output-error") return t("chat.activity.pageFetchFailed");
     if (lastTool.state === "output-available") {
-      return isFetchedImage(lastTool.output) ? "Viewed image" : "Read page";
+      return isFetchedImage(lastTool.output)
+        ? t("chat.activity.viewedImage")
+        : t("chat.activity.readPage");
     }
-    return "Page fetch did not complete";
+    return t("chat.activity.pageFetchIncomplete");
   }
   if (lastTool && isReadFilePart(lastTool)) {
-    if (lastTool.state === "output-error") return "File read failed";
+    if (lastTool.state === "output-error") return t("chat.activity.fileReadFailed");
     if (lastTool.state === "output-available") {
-      return `Read ${lastTool.output?.file ?? lastTool.input?.file ?? "file"}`;
+      const file = lastTool.output?.file ?? lastTool.input?.file;
+      return file
+        ? t("chat.activity.readNamedFile", { file })
+        : t("chat.activity.readFile");
     }
-    return "File read did not complete";
+    return t("chat.activity.fileReadIncomplete");
   }
   if (lastTool && isSearchFilesPart(lastTool)) {
-    if (lastTool.state === "output-error") return "File search failed";
-    if (lastTool.state === "output-available") return "Searched files";
-    return "File search did not complete";
+    if (lastTool.state === "output-error") return t("chat.activity.fileSearchFailed");
+    if (lastTool.state === "output-available") return t("chat.activity.searchedFiles");
+    return t("chat.activity.fileSearchIncomplete");
   }
   if (lastTool && isCodeExecutionPart(lastTool)) {
-    if (lastTool.state === "output-error") return "Code run failed";
-    if (lastTool.state !== "output-available") return "Code run did not complete";
-    const label = lastTool.output?.exitCode === 0 ? "Ran code" : "Code ended with an error";
+    if (lastTool.state === "output-error") return t("chat.activity.codeRunFailed");
+    if (lastTool.state !== "output-available") return t("chat.activity.codeRunIncomplete");
+    const ok = lastTool.output?.exitCode === 0;
     // Run files show inside the steps, so the summary says they are there.
     const files = parts.filter(isCodeExecutionPart).flatMap(codeExecutionFiles).length;
-    return files ? `${label} · ${files} ${files === 1 ? "file" : "files"}` : label;
+    if (files > 0) {
+      return ok
+        ? t("chat.activity.ranCodeWithFiles", { count: files })
+        : t("chat.activity.codeEndedWithErrorWithFiles", { count: files });
+    }
+    return ok ? t("chat.activity.ranCode") : t("chat.activity.codeEndedWithError");
   }
   if (lastTool && isGmailToolPart(lastTool)) {
-    return gmailActivityLabel(lastTool, false);
+    return gmailActivityLabel(lastTool, false, t);
   }
   if (lastTool && isCalendarToolPart(lastTool)) {
-    return calendarActivityLabel(lastTool, false);
+    return calendarActivityLabel(lastTool, false, t);
   }
   if (lastTool && isViewSkillToolPart(lastTool)) {
-    return viewSkillActivityLabel(lastTool, false);
+    return viewSkillActivityLabel(lastTool, false, t);
   }
   if (lastTool && isScheduledTaskToolPart(lastTool)) {
-    return scheduledTaskActivityLabel(lastTool, false);
+    return scheduledTaskActivityLabel(lastTool, false, t);
   }
   if (lastTool && isMcpTool(lastTool)) {
     const parsed = parseMcpToolName(lastTool.toolName);
-    const label = parsed
-      ? `${parsed.serverName} · ${parsed.toolName}`
-      : "MCP tool";
-    if (lastTool.state === "output-error") return `${label} failed`;
-    if (lastTool.state === "output-available") return `Used ${label}`;
-    return `${label} did not complete`;
+    const label = parsed ? `${parsed.serverName} · ${parsed.toolName}` : null;
+    if (lastTool.state === "output-error") {
+      return label
+        ? t("chat.activity.mcpNamedFailed", { label })
+        : t("chat.activity.mcpToolFailed");
+    }
+    if (lastTool.state === "output-available") {
+      return label
+        ? t("chat.activity.mcpNamedUsed", { label })
+        : t("chat.activity.mcpToolUsed");
+    }
+    return label
+      ? t("chat.activity.mcpNamedIncomplete", { label })
+      : t("chat.activity.mcpToolIncomplete");
   }
-  return duration > 0 ? `Thought for ${duration}s` : "Thoughts";
+  return duration > 0
+    ? t("chat.activity.thoughtForSeconds", { duration })
+    : t("chat.activity.thoughts");
 }

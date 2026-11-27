@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { Ionicons } from "@expo/vector-icons";
 import {
   BottomSheetBackdrop,
@@ -6,6 +7,7 @@ import {
   BottomSheetTextInput,
   type BottomSheetScrollViewMethods,
 } from "@gorhom/bottom-sheet";
+import { SheetBackdrop, SheetHandle } from "@/components/ui/SheetChrome";
 import {
   useCallback,
   useEffect,
@@ -20,6 +22,7 @@ import { useTheme } from "@/lib/theme";
 /** A single-choice picker using the same sheet presentation as the drawer. */
 export function SelectionSheet<T extends string>({
   title,
+  searchLabel,
   visible,
   value,
   options,
@@ -28,6 +31,7 @@ export function SelectionSheet<T extends string>({
   onSelect,
 }: {
   title: string;
+  searchLabel?: string;
   visible: boolean;
   value: T;
   options: readonly { value: T; label: string; leading?: ReactNode }[];
@@ -55,6 +59,7 @@ export function SelectionSheet<T extends string>({
   }, []);
   const [search, setSearch] = useState("");
   const { colors, radii, fonts } = useTheme();
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const searchable = options.length > 8;
   useEffect(() => {
@@ -80,7 +85,7 @@ export function SelectionSheet<T extends string>({
   }, [visible]);
   const backdrop = useCallback(
     (props: React.ComponentProps<typeof BottomSheetBackdrop>) => (
-      <BottomSheetBackdrop
+      <SheetBackdrop
         {...props}
         appearsOnIndex={0}
         disappearsOnIndex={-1}
@@ -95,6 +100,7 @@ export function SelectionSheet<T extends string>({
   );
   return (
     <BottomSheetModal
+      handleComponent={SheetHandle}
       ref={ref}
       snapPoints={searchable ? ["75%"] : undefined}
       enableDynamicSizing={!searchable}
@@ -145,7 +151,7 @@ export function SelectionSheet<T extends string>({
           </Text>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={`Close ${title}`}
+            accessibilityLabel={t("app.mobile.selectionSheet.closeLabel", { title })}
             onPress={() => ref.current?.dismiss()}
             style={{
               width: 44,
@@ -159,8 +165,10 @@ export function SelectionSheet<T extends string>({
         </View>
         {searchable && (
           <BottomSheetTextInput
-            accessibilityLabel={`Search ${title.toLowerCase()}`}
-            placeholder="Search"
+            accessibilityLabel={
+              searchLabel ?? t("app.mobile.selectionSheet.searchLabel")
+            }
+            placeholder={t("app.mobile.selectionSheet.searchPlaceholder")}
             placeholderTextColor={colors.mutedForeground}
             value={search}
             onChangeText={setSearch}
@@ -246,7 +254,7 @@ export function SelectionSheet<T extends string>({
               fontFamily: fonts.sansRegular,
             }}
           >
-            No matching options
+            {t("app.mobile.selectionSheet.noMatches")}
           </Text>
         )}
       </BottomSheetScrollView>
