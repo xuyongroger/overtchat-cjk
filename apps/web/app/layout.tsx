@@ -71,7 +71,7 @@ const sidebarScript = `(function(){try{
 
 export const metadata: Metadata = {
   title: "overtchat",
-  description: "自托管的 OpenAI 兼容端点聊天界面",
+  description: "Simple self-hosted chat UI for OpenAI-compatible endpoints",
   appleWebApp: {
     title: "overtchat",
     capable: true,
@@ -92,7 +92,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="zh-CN"
+      lang="en"
       className={`${sans.variable} ${serif.variable} ${mono.variable} ${inter.variable} ${roboto.variable} ${geist.variable} ${ibmPlexSans.variable} h-full antialiased`}
       suppressHydrationWarning
     >
