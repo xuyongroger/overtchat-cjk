@@ -44,14 +44,47 @@ MAX_RUNS = int(os.environ.get("SANDBOX_MAX_RUNS", "4"))
 MEMORY_BYTES = int(os.environ.get("SANDBOX_MEMORY_MB", "4096")) * 1024 * 1024
 DEFAULT_TIMEOUT = int(os.environ.get("SANDBOX_TIMEOUT_SECONDS", "60"))
 MAX_TIMEOUT = int(os.environ.get("SANDBOX_MAX_TIMEOUT_SECONDS", "300"))
-# Appended to stderr when a run fails; points at the conversation-lessons
-# guide. The guide itself is not in the skills list: it is read only when a
-# repeat failure calls for it.
+# Appended to stderr when a run fails (the conversation-lessons protocol).
+# Without a lessons.md attached the hint bootstraps one; with one, the file's
+# current text rides along inside the hint so the code cannot skip reading
+# it. The guide itself is not in the skills list: it is read only when detail
+# is needed.
 LESSONS_HINT = (
-    "[overtchat] If this is the second time the same failure has hit this "
-    "conversation, read /opt/overtchat/guides/lessons.md and maintain the "
-    "conversation's lessons.md as it describes before retrying.\n"
+    "[overtchat] LESSONS PROTOCOL: this conversation has no lessons.md "
+    "attached. If this same failure has now hit it twice, create the file "
+    "before retrying: save the full text to outputs/lessons.md ending with "
+    "one line '- <failure fingerprint>: <verified fix>' for this failure, "
+    "and a later failed run shows you the file's content here. Full "
+    "protocol: /opt/overtchat/guides/lessons.md\n"
 )
+LESSONS_INLINE_BYTES = 4096
+
+
+def lessons_hint(uploads: Path) -> str:
+    """Failure stderr tail; embeds the conversation's lessons.md when
+    present so the retry guidance cannot be skipped; falls back to the
+    bootstrap hint when the file is absent or unreadable."""
+    try:
+        path = uploads / "lessons.md"
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return LESSONS_HINT
+        raw = path.read_bytes()
+    except OSError:
+        return LESSONS_HINT
+    truncated = len(raw) > LESSONS_INLINE_BYTES
+    text = raw[:LESSONS_INLINE_BYTES].decode("utf-8", "replace").rstrip("\n")
+    fence = "----8<---- lessons.md ----"
+    return (
+        "[overtchat] LESSONS PROTOCOL (do this before retrying): the "
+        "conversation's lessons.md currently says:\n"
+        f"{fence}\n{text}\n"
+        + ("…(truncated)…\n" if truncated else "")
+        + f"{fence}\n"
+        "Append one line about THIS failure in the same format "
+        "(- <failure fingerprint>: <verified fix>), then save the whole "
+        "updated text to outputs/lessons.md; the same name replaces the "
+        "conversation copy. Do not retry until it is saved.\n"
+    )
 
 MAX_PROCESSES = 64
 MAX_FILE_BYTES = 100 * 1024 * 1024
@@ -381,7 +414,7 @@ def run(payload: dict) -> dict:
         status = process.returncode
         stderr_text = stderr.text()
         if status != 0:
-            stderr_text += LESSONS_HINT
+            stderr_text += lessons_hint(uploads)
         return {
             "exit_code": status if status >= 0 else None,
             "signal": signal.Signals(-status).name if status < 0 else None,

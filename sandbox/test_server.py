@@ -67,6 +67,34 @@ class SandboxTests(unittest.TestCase):
         self.assertEqual(guide["exit_code"], 0, guide["stderr"])
         self.assertIn("lessons.md", guide["stdout"])
 
+    def test_failed_run_bootstraps_without_lessons(self):
+        # No lessons.md attached: the hint tells the code to create one.
+        failed = run("raise ValueError('boom')")
+        self.assertIn("LESSONS PROTOCOL: this conversation has no lessons.md", failed["stderr"])
+
+    def test_failed_run_embeds_existing_lessons(self):
+        # With a lessons.md in the conversation the failed run must show its
+        # content inline plus the imperative to append and re-save, so the
+        # retry guidance cannot be skipped by not reading the file.
+        lessons = "# Conversation lessons\n- fonts: use Noto, not Droid alone\n"
+        failed = run(
+            "raise ValueError('boom')",
+            files=[{"name": "lessons.md", "data": encode(lessons)}],
+        )
+        self.assertEqual(failed["exit_code"], 1)
+        self.assertIn("LESSONS PROTOCOL (do this before retrying)", failed["stderr"])
+        self.assertIn("use Noto, not Droid alone", failed["stderr"])
+        self.assertIn("Do not retry until it is saved", failed["stderr"])
+
+    def test_failed_run_truncates_huge_lessons(self):
+        lessons = "x" * (server.LESSONS_INLINE_BYTES + 1000) + "\nTAILMARK\n"
+        failed = run(
+            "raise ValueError('boom')",
+            files=[{"name": "lessons.md", "data": encode(lessons)}],
+        )
+        self.assertIn("…(truncated)…", failed["stderr"])
+        self.assertNotIn("TAILMARK", failed["stderr"])
+
     def test_reads_uploads_read_only_through_both_paths(self):
         result = run(
             "import pandas as pd\n"
